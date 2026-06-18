@@ -1,0 +1,115 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  overflow: hidden;
+  background: #1a1a2e;
+  font-family: 'Courier New', monospace;
+}
+
+#game-container {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+#crosshair {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 100;
+}
+
+#crosshair::before,
+#crosshair::after {
+  content: '';
+  position: absolute;
+  background: white;
+  mix-blend-mode: difference;
+}
+
+#crosshair::before {
+  width: 20px;
+  height: 2px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+#crosshair::after {
+  width: 2px;
+  height: 20px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+#hud {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  color: white;
+  font-size: 14px;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  z-index: 100;
+}
+
+#hud div {
+  margin: 4px 0;
+}
+
+#start-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 200;
+  color: white;
+}
+
+#start-screen h1 {
+  font-size: 64px;
+  margin-bottom: 10px;
+  text-shadow: 4px 4px 0 #4a4a6a;
+  letter-spacing: 4px;
+}
+
+#start-screen p {
+  font-size: 18px;
+  color: #aaa;
+  margin-bottom: 30px;
+}
+
+#start-btn {
+  padding: 15px 50px;
+  font-size: 20px;
+  font-family: inherit;
+  background: #4a4a6a;
+  color: white;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+#start-btn:hover {
+  background: #6a6a8a;
+  transform: scale(1.05);
+}
+
+.controls {
+  margin-top: 40px;
+  font-size: 13px;
+  color: #666;
+}
