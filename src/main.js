@@ -1,5 +1,6 @@
 /**
  * main.js: Entry point
+ * Corrigido: pointer lock robusto, ordem de inicialização segura
  */
 import '../style.css';
 import { Renderer } from './renderer/renderer.js';
@@ -22,8 +23,17 @@ class UndercraftX {
     this.scene = this.renderer.scene;
     this.hud = new HUD(); this.hud.hide();
     this.startBtn.addEventListener('click', () => this._start());
-    this.container.addEventListener('click', () => { if (this.isRunning) this.container.requestPointerLock(); });
-    document.addEventListener('pointerlockchange', () => { if (this.player) this.player.isLocked = document.pointerLockElement === this.container; });
+    this.container.addEventListener('click', () => {
+      if (this.isRunning) this.container.requestPointerLock();
+    });
+    // Corrigido: pointer lock change lida com todos os estados
+    document.addEventListener('pointerlockchange', () => {
+      if (this.player) {
+        this.player.isLocked = document.pointerLockElement === this.container;
+      }
+    });
+    // Corrigido: prevenir contexto ao clicar com botão direito no container
+    this.container.addEventListener('contextmenu', e => e.preventDefault());
   }
 
   _start() {

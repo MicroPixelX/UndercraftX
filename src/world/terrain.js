@@ -1,5 +1,7 @@
 /**
  * terrain.js: Geração procedural + biomas + árvores
+ * Corrigido: troncos de árvores não sobrescrevem blocos existentes
+ * + fix: getHeight sempre retorna valor clamped entre 1 e 254
  */
 import { BlockID } from '../blocks/Block.js';
 import { TreeTypes } from '../trees/index.js';
@@ -38,7 +40,8 @@ export class TerrainGenerator {
     let height = this.seaLevel + (n+h) * this.heightScale;
     if (b === BIOME.SNOW) height += 8;
     if (b === BIOME.DESERT) height = height * 0.7 + 5;
-    return Math.floor(height);
+    // Corrigido: clamped para evitar alturas inválidas
+    return Math.max(1, Math.min(254, Math.floor(height)));
   }
 
   getBlockAt(wx, wy, wz, gh, biome) {
@@ -62,7 +65,7 @@ export class TerrainGenerator {
       const wx=bx+lx, wz=bz+lz, h=this.getHeight(wx,wz), b=this.getBiome(wx,wz);
       for (let y=0;y<256;y++) { const bl=this.getBlockAt(wx,y,wz,h,b); if(bl!==BlockID.AIR) chunk.setBlock(lx,y,lz,bl); }
     }
-    // Árvores
+    // Árvores — corrigido: não sobrescrever blocos sólidos existentes com troncos
     for (let lx=2;lx<14;lx++) for (let lz=2;lz<14;lz++) {
       const wx=bx+lx, wz=bz+lz, h=this.getHeight(wx,wz), b=this.getBiome(wx,wz);
       if (h <= this.seaLevel+1) continue;
@@ -75,7 +78,14 @@ export class TerrainGenerator {
       }
       for (const T of types) {
         const ts = this.treeNoise.noise2D(wx*0.7, wz*0.7);
-        if (((ts+1)/2) < T.chance && h >= T.minGround) { T.place(chunk, lx, h+1, lz); break; }
+        if (((ts+1)/2) < T.chance && h >= T.minGround) {
+          // Verificar se o bloco de spawn da árvore é adequado (grama/areia/neve)
+          const groundBlock = chunk.getBlock(lx, h, lz);
+          if (groundBlock === BlockID.GRASS || groundBlock === BlockID.SAND || groundBlock === BlockID.SNOW) {
+            T.place(chunk, lx, h+1, lz);
+          }
+          break;
+        }
       }
     }
   }

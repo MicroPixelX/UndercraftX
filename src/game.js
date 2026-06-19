@@ -1,5 +1,7 @@
 /**
  * game.js: Mundo + chunks + culling cross-chunk
+ * Corrigido: bounds checking em getBlockAt, proteção contra coordenadas
+ * negativas/overflow em Y
  */
 import * as THREE from 'three';
 import { Chunk } from './world/chunk.js';
@@ -21,15 +23,21 @@ export class Game {
   key(cx,cz){return `${cx},${cz}`;}
 
   getBlockAt(wx,wy,wz){
+    // Garantir que wy seja inteiro e dentro dos bounds
+    const iy = Math.floor(wy);
+    if(iy < 0 || iy >= CH) return BlockID.AIR;
     const cx=Math.floor(wx/CS),cz=Math.floor(wz/CS);
     const ch=this.chunks.get(this.key(cx,cz));
     if(!ch)return BlockID.AIR;
-    const lx=((wx%CS)+CS)%CS,lz=((wz%CS)+CS)%CS,ly=Math.floor(wy);
-    if(ly<0||ly>=CH)return BlockID.AIR;
-    return ch.getBlock(lx,ly,lz);
+    const lx=((wx%CS)+CS)%CS,lz=((wz%CS)+CS)%CS;
+    return ch.getBlock(lx,iy,lz);
   }
 
-  getNeighborBlock(gx,gy,gz){return this.getBlockAt(Math.floor(gx),gy,Math.floor(gz));}
+  getNeighborBlock(gx,gy,gz){
+    // Bounds check em Y para vizinhos cross-chunk
+    if(gy < 0 || gy >= CH) return BlockID.AIR;
+    return this.getBlockAt(Math.floor(gx),gy,Math.floor(gz));
+  }
 
   updateChunks(px,pz){
     const pcx=Math.floor(px/CS),pcz=Math.floor(pz/CS);

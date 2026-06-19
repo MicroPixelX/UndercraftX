@@ -1,5 +1,6 @@
 /**
  * player.js: FPS + física com colisão, água, spawn seguro
+ * Corrigido: detecção de água, bounds checking, water physics
  */
 import * as THREE from 'three';
 
@@ -27,8 +28,15 @@ export class Player {
 
   update(delta, getBlockAt) {
     const dt = Math.min(delta, 0.05);
-    const fb = getBlockAt(Math.floor(this.position.x), Math.floor(this.position.y), Math.floor(this.position.z));
-    this.isInWater = fb === 6;
+
+    // Corrigido: checar água no bloco dos pés e do corpo
+    const feetY = Math.floor(this.position.y);
+    const bodyY = Math.floor(this.position.y + 1);
+    const bx = Math.floor(this.position.x);
+    const bz = Math.floor(this.position.z);
+    const feetBlock = getBlockAt(bx, feetY, bz);
+    const bodyBlock = getBlockAt(bx, bodyY, bz);
+    this.isInWater = (feetBlock === 6 || bodyBlock === 6);
 
     const dir = new THREE.Vector3();
     const fwd = new THREE.Vector3(-Math.sin(this.yaw),0,-Math.cos(this.yaw));
@@ -44,18 +52,31 @@ export class Player {
     const hs = Math.sqrt(this.velocity.x**2+this.velocity.z**2);
     if(hs>speed){this.velocity.x=(this.velocity.x/hs)*speed;this.velocity.z=(this.velocity.z/hs)*speed;}
 
+    // Gravidade
     const g = this.isInWater ? this.waterGravity : this.gravity;
     this.velocity.y -= g*dt;
     this.velocity.y = Math.max(this.velocity.y, this.isInWater?-3:-50);
 
-    if(this.isInWater&&this.wantJump){this.velocity.y=3;this.wantJump=false;}
-    if(this.wantJump&&this.onGround&&!this.isInWater){this.velocity.y=this.jumpForce;this.onGround=false;}
-    this.wantJump=false;
+    // Corrigido: nadar (Space na água) e pular no chão são mutuamente exclusivos
+    if(this.isInWater && this.wantJump){
+      this.velocity.y = 3;
+      this.wantJump = false;
+    } else if(this.wantJump && this.onGround && !this.isInWater){
+      this.velocity.y = this.jumpForce;
+      this.onGround = false;
+      this.wantJump = false;
+    } else {
+      this.wantJump = false;
+    }
 
     const np = this.position.clone(), hw = this.width/2;
+
+    // Corrigido: Y clamped para não sair do mundo
     np.x += this.velocity.x*dt;
     if(this._col(np,hw,this.height,getBlockAt)){np.x=this.position.x;this.velocity.x=0;}
     np.y += this.velocity.y*dt; this.onGround=false;
+    // Clamp Y para não cair abaixo de 0
+    if(np.y < 0){ np.y = 0; this.velocity.y = 0; this.onGround = true; }
     if(this._col(np,hw,this.height,getBlockAt)){if(this.velocity.y<0)this.onGround=true;np.y=this.position.y;this.velocity.y=0;}
     np.z += this.velocity.z*dt;
     if(this._col(np,hw,this.height,getBlockAt)){np.z=this.position.z;this.velocity.z=0;}
@@ -68,7 +89,13 @@ export class Player {
 
   _col(pos,hw,h,gb){
     const mnX=Math.floor(pos.x-hw),mxX=Math.floor(pos.x+hw),mnY=Math.floor(pos.y),mxY=Math.floor(pos.y+h),mnZ=Math.floor(pos.z-hw),mxZ=Math.floor(pos.z+hw);
-    for(let x=mnX;x<=mxX;x++)for(let y=mnY;y<=mxY;y++)for(let z=mnZ;z<=mxZ;z++){const b=gb(x,y,z);if(b!==0&&b!==6)return true;}
+    // Bounds check: não colidir fora do mundo
+    if(mnY < 0 || mxY >= 256) return mnY < 0; // chão virtual em Y=0
+    for(let x=mnX;x<=mxX;x++)for(let y=mnY;y<=mxY;y++)for(let z=mnZ;z<=mxZ;z++){
+      const b=gb(x,y,z);
+      // Água (6) e ar (0) não colidem
+      if(b!==0&&b!==6)return true;
+    }
     return false;
   }
 }
