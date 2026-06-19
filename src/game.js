@@ -15,7 +15,7 @@ export class Game {
     initBlockTextures();
     this.chunks = new Map();
     this.terrain = new TerrainGenerator(42);
-    this.cx = 0; this.cz = 0; this.throttle = 0;
+    this.cx = NaN; this.cz = NaN; this.throttle = 0;
   }
 
   key(cx,cz){return `${cx},${cz}`;}
