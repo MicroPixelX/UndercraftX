@@ -1,204 +1,116 @@
 /**
- * Chunk:bloco 16x16x16
- * Responsável por armazenar blocos e gerar mesh
+ * chunk.js: Chunk 16x256x16 com face culling cross-chunk corrigido
  */
-
 import * as THREE from 'three';
-import { BlockData, isBlockSolid, getBlockColor, BlockType } from './block-types.js';
+import { BlockID, BlockRegistry, isBlockTransparent } from '../blocks/Block.js';
 
-const CHUNK_SIZE = 16;
+const SX = 16, SY = 256, SZ = 16;
 
 export class Chunk {
-  constructor(chunkX, chunkY, chunkZ) {
-    this.chunkX = chunkX;
-    this.chunkY = chunkY;
-    this.chunkZ = chunkZ;
-    
-    this.blocks = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE);
-    this.mesh = null;
-    this.dirty = true;
+  constructor(cx, cz) {
+    this.chunkX = cx; this.chunkZ = cz;
+    this.blocks = new Uint8Array(SX * SY * SZ);
+    this.mesh = null; this.waterMesh = null; this.dirty = true;
   }
 
-  /**
-   * Converte coords locais (0-15) → índice único
-   */
-  localToIndex(x, y, z) {
-    return x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE;
+  idx(x, y, z) { return x + z * SX + y * SX * SZ; }
+
+  setBlock(x, y, z, t) {
+    if (x<0||x>=SX||y<0||y>=SY||z<0||z>=SZ) return;
+    this.blocks[this.idx(x,y,z)] = t; this.dirty = true;
   }
 
-  /**
-   * Converte coords locais → coords globais (float)
-   */
-  localToGlobal(x, y, z) {
-    return {
-      x: this.chunkX * CHUNK_SIZE + x,
-      y: this.chunkY * CHUNK_SIZE + y,
-      z: this.chunkZ * CHUNK_SIZE + z
-    };
-  }
-
-  /**
-   * Define tipo de bloco em coords locais
-   */
-  setBlock(x, y, z, blockType) {
-    if (x < 0 || x >= CHUNK_SIZE || 
-        y < 0 || y >= CHUNK_SIZE || 
-        z < 0 || z >= CHUNK_SIZE) return;
-    
-    this.blocks[this.localToIndex(x, y, z)] = blockType;
-    this.dirty = true;
-  }
-
-  /**
-   * Obtém tipo de bloco em coords locais
-   */
   getBlock(x, y, z) {
-    if (x < 0 || x >= CHUNK_SIZE || 
-        y < 0 || y >= CHUNK_SIZE || 
-        z < 0 || z >= CHUNK_SIZE) return BlockType.AIR;
-    
-    return this.blocks[this.localToIndex(x, y, z)];
+    if (x<0||x>=SX||y<0||y>=SY||z<0||z>=SZ) return BlockID.AIR;
+    return this.blocks[this.idx(x,y,z)];
   }
 
-  /**
-   * Verifica se bloco é visível (tem face exposta)
-   */
-  hasExposedFace(x, y, z, getNeighbor) {
-    const block = this.getBlock(x, y, z);
-    if (block === BlockType.AIR) return false;
-    if (!isBlockSolid(block)) return false;
-
-    // Verifica as 6 direções
-    const neighbors = [
-      [x - 1, y, z],
-      [x + 1, y, z],
-      [x, y - 1, z],
-      [x, y + 1, z],
-      [x, y, z - 1],
-      [x, y, z + 1]
-    ];
-
-    for (const [nx, ny, nz] of neighbors) {
-      const neighborBlock = getNeighbor(nx, ny, nz);
-      if (neighborBlock === BlockType.AIR || !isBlockSolid(neighborBlock)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Gera buffer geometry otimizado (apenas faces visíveis)
-   */
   generateMesh(getNeighbor) {
-    const positions = [];
-    const colors = [];
-    const indices = [];
+    const pos = [], col = [], idx = [];
+    const wpos = [], wcol = [], widx = [];
 
-    // Geometria do cubo (6 faces, 4 vértices cada)
-    const faceOffsets = [
-      { dir: [0, 1, 0], face: 'top', vertices: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]] },    // Top
-      { dir: [0, -1, 0], face: 'bottom', vertices: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]] }, // Bottom
-      { dir: [1, 0, 0], face: 'side', vertices: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]] },    // Right
-      { dir: [-1, 0, 0], face: 'side', vertices: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]] },   // Left
-      { dir: [0, 0, 1], face: 'side', vertices: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]] },    // Front
-      { dir: [0, 0, -1], face: 'side', vertices: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]] }    // Back
+    const faces = [
+      { dir:[0,1,0], verts:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]] },
+      { dir:[0,-1,0], verts:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]] },
+      { dir:[1,0,0], verts:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]] },
+      { dir:[-1,0,0], verts:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]] },
+      { dir:[0,0,1], verts:[[0,0,1],[1,0,1],[1,1,1],[0,1,1]] },
+      { dir:[0,0,-1], verts:[[1,0,0],[0,0,0],[0,1,0],[1,1,0]] },
     ];
 
-    for (let x = 0; x < CHUNK_SIZE; x++) {
-      for (let y = 0; y < CHUNK_SIZE; y++) {
-        for (let z = 0; z < CHUNK_SIZE; z++) {
-          const block = this.getBlock(x, y, z);
-          if (block === BlockType.AIR) continue;
-          if (!isBlockSolid(block)) continue;
+    for (let x=0;x<SX;x++) for (let y=0;y<SY;y++) for (let z=0;z<SZ;z++) {
+      const block = this.getBlock(x,y,z);
+      if (block === BlockID.AIR) continue;
+      const data = BlockRegistry[block];
+      if (!data) continue;
 
-          const blockData = BlockData[block];
-          if (!blockData) continue;
+      const isWater = block === BlockID.WATER;
+      const gx = this.chunkX * SX + x;
+      const gz = this.chunkZ * SZ + z;
 
-          const gx = this.chunkX * CHUNK_SIZE + x;
-          const gy = this.chunkY * CHUNK_SIZE + y;
-          const gz = this.chunkZ * CHUNK_SIZE + z;
+      for (const { dir, verts } of faces) {
+        const nx=x+dir[0], ny=y+dir[1], nz=z+dir[2];
+        let nb;
+        if (nx<0||nx>=SX||ny<0||ny>=SY||nz<0||nz>=SZ) nb = getNeighbor(gx+dir[0], ny, gz+dir[2]);
+        else nb = this.getBlock(nx,ny,nz);
 
-          // Para cada face do cubo
-          for (let f = 0; f < 6; f++) {
-            const { dir, face, vertices } = faceOffsets[f];
-            const nx = x + dir[0];
-            const ny = y + dir[1];
-            const nz = z + dir[2];
-
-            const neighborBlock = getNeighbor(nx, ny, nz);
-
-            // Se vizinho é sólido e não transparente, skipa essa face
-            if (isBlockSolid(neighborBlock) && !blockData.transparent) {
-              continue;
-            }
-
-            // Se bloco atual é transparente MAS vizinho também é, skipa
-            if (blockData.transparent && neighborBlock !== BlockType.AIR) {
-              continue;
-            }
-
-            const baseIndex = positions.length / 3;
-            const color = getBlockColor(block, face);
-
-            // 4 vértices da face
-            for (const v of vertices) {
-              positions.push(gx + v[0], gy + v[1], gz + v[2]);
-              colors.push((color >> 16 & 255) / 255, (color >> 8 & 255) / 255, (color & 255) / 255);
-            }
-
-            // 2 triângulos (4 vértices em Winding order)
-            indices.push(
-              baseIndex, baseIndex + 1, baseIndex + 2,
-              baseIndex, baseIndex + 2, baseIndex + 3
-            );
-          }
+        // Culling corrigido
+        if (isWater) {
+          if (nb === BlockID.WATER) continue;
+          if (nb !== BlockID.AIR && !isBlockTransparent(nb)) continue;
+        } else {
+          if (nb !== BlockID.AIR && !isBlockTransparent(nb)) continue;
+          if (data.transparent && nb === block) continue;
         }
+
+        const tp = isWater ? wpos : pos;
+        const tc = isWater ? wcol : col;
+        const ti = isWater ? widx : idx;
+        const bi = tp.length / 3;
+        const c = isWater ? 0x3060c0 : 0xffffff;
+
+        for (const v of verts) {
+          tp.push(gx+v[0], y+v[1], gz+v[2]);
+          tc.push(((c>>16)&255)/255, ((c>>8)&255)/255, (c&255)/255);
+        }
+        ti.push(bi, bi+1, bi+2, bi, bi+2, bi+3);
       }
     }
-
-    if (positions.length === 0) return null;
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
-
-    return geometry;
+    return { solid:{pos,col,idx}, water:{pos:wpos,col:wcol,idx:widx} };
   }
 
-  /**
-   * Desenha o chunk (cria ou atualiza mesh)
-   */
   buildMesh(scene, getNeighbor) {
-    if (this.mesh) {
-      scene.remove(this.mesh);
-      this.mesh.geometry.dispose();
+    this.dispose(scene);
+    const d = this.generateMesh(getNeighbor);
+
+    if (d.solid.pos.length > 0) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(d.solid.pos, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(d.solid.col, 3));
+      g.setIndex(d.solid.idx);
+      g.computeVertexNormals();
+      this.mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+      scene.add(this.mesh);
     }
 
-    const geometry = this.generateMesh(getNeighbor);
-    if (!geometry) return;
-
-    const material = new THREE.MeshLambertMaterial({
-      vertexColors: true,
-      side: THREE.FrontSide
-    });
-
-    this.mesh = new THREE.Mesh(geometry, material);
-    scene.add(this.mesh);
+    if (d.water.pos.length > 0) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(d.water.pos, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(d.water.col, 3));
+      g.setIndex(d.water.idx);
+      g.computeVertexNormals();
+      const m = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false });
+      this.waterMesh = new THREE.Mesh(g, m);
+      this.waterMesh.renderOrder = 1;
+      scene.add(this.waterMesh);
+    }
     this.dirty = false;
   }
 
-  /**
-   * Remove mesh da cena
-   */
   dispose(scene) {
-    if (this.mesh) {
-      scene.remove(this.mesh);
-      this.mesh.geometry.dispose();
-      this.mesh.material.dispose();
-      this.mesh = null;
-    }
+    if (this.mesh) { scene.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh.material.dispose(); this.mesh = null; }
+    if (this.waterMesh) { scene.remove(this.waterMesh); this.waterMesh.geometry.dispose(); this.waterMesh.material.dispose(); this.waterMesh = null; }
   }
 }
+
+export { SX as CHUNK_SIZE_X, SY as CHUNK_SIZE_Y, SZ as CHUNK_SIZE_Z };

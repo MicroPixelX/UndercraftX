@@ -1,98 +1,43 @@
 /**
- * Renderer: configuração Three.js + iluminação
+ * renderer.js: Three.js + skybox shader + fog alinhado
  */
-
 import * as THREE from 'three';
+
+const RD = 4, CS = 16;
+const FOG_S = (RD-1)*CS, FOG_E = RD*CS;
 
 export class Renderer {
   constructor(container) {
     this.container = container;
-
-    // Three.js renderer
     this.threeRenderer = new THREE.WebGLRenderer({ antialias: true });
-    this.threeRenderer.setPixelRatio(window.devicePixelRatio);
+    this.threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.threeRenderer.setSize(window.innerWidth, window.innerHeight);
-    this.threeRenderer.setClearColor(0x87CEEB); // Sky blue
+    this.threeRenderer.setClearColor(0x87CEEB);
     container.appendChild(this.threeRenderer.domElement);
 
-    // Câmera
-    this.camera = new THREE.PerspectiveCamera(
-      75,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      1000
-    );
-    this.camera.up.set(0, 1, 0);
-
-    // Cena
+    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, FOG_E*1.5);
     this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.Fog(0x87CEEB, FOG_S, FOG_E);
 
-    // Névoa (distância)
-    this.scene.fog = new THREE.Fog(0x87CEEB, 50, 150);
+    const amb = new THREE.AmbientLight(0x8899bb, 0.5); this.scene.add(amb);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(100,200,100); this.scene.add(sun);
+    const hemi = new THREE.HemisphereLight(0x87CEEB, 0x8b5a2b, 0.3); this.scene.add(hemi);
 
-    // Iluminação
-    this._setupLighting();
-
-    // Skybox simples (gradiente)
-    this._setupSky();
-
-    // Resize handler
-    window.addEventListener('resize', () => this._onResize());
-  }
-
-  _setupLighting() {
-    // Luz ambiente suave
-    const ambient = new THREE.AmbientLight(0x6688cc, 0.4);
-    this.scene.add(ambient);
-
-    // Luz direcional (sol)
-    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-    sun.position.set(50, 100, 50);
-    this.scene.add(sun);
-
-    // Luz fillsubdirecional fraca
-    const fill = new THREE.DirectionalLight(0x8888ff, 0.3);
-    fill.position.set(-50, 50, -50);
-    this.scene.add(fill);
-  }
-
-  _setupSky() {
-    // Skybox com gradiente simples (3 planos de cor)
-    // Horizonte azul claro
-    const skyGeo = new THREE.SphereGeometry(400, 32, 32);
-    const skyMat = new THREE.MeshBasicMaterial({
-      color: 0x87CEEB,
-      side: THREE.BackSide
+    const sg = new THREE.SphereGeometry(FOG_E*1.4, 32, 15);
+    const sm = new THREE.ShaderMaterial({
+      uniforms: { top:{value:new THREE.Color(0x0077ff)}, bot:{value:new THREE.Color(0x87CEEB)}, off:{value:33}, exp:{value:0.6} },
+      vertexShader: `varying vec3 vW;void main(){vec4 w=modelMatrix*vec4(position,1.);vW=w.xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+      fragmentShader: `uniform vec3 top,bot;uniform float off,exp;varying vec3 vW;void main(){float h=normalize(vW+off).y;gl_FragColor=vec4(mix(bot,top,max(pow(max(h,0.),exp),0.)),1.);}`,
+      side: THREE.BackSide, depthWrite: false
     });
-    this.sky = new THREE.Mesh(skyGeo, skyMat);
+    this.sky = new THREE.Mesh(sg, sm);
+    this.sky.renderOrder = -1;
     this.scene.add(this.sky);
+
+    window.addEventListener('resize', () => this._r());
   }
 
-  _onResize() {
-    this.camera.aspect = window.innerWidth / window.innerHeight;
-    this.camera.updateProjectionMatrix();
-    this.threeRenderer.setSize(window.innerWidth, window.innerHeight);
-  }
-
-  /**
-   * Renderiza um frame
-   */
-  render() {
-    this.threeRenderer.render(this.scene, this.camera);
-  }
-
-  /**
-   * Atualiza skybox para seguir câmera
-   */
-  updateSky(position) {
-    this.sky.position.copy(position);
-  }
-
-  /**
-   * Libera recursos
-   */
-  dispose() {
-    window.removeEventListener('resize', this._onResize);
-    this.threeRenderer.dispose();
-  }
+  _r(){this.camera.aspect=window.innerWidth/window.innerHeight;this.camera.updateProjectionMatrix();this.threeRenderer.setSize(window.innerWidth,window.innerHeight);}
+  render(){this.threeRenderer.render(this.scene,this.camera);}
+  updateSky(p){this.sky.position.copy(p);}
 }

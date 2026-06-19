@@ -1,153 +1,63 @@
 /**
- * Game: gerencia mundo, chunks e game loop
+ * game.js: Mundo + chunks + culling cross-chunk
  */
-
 import * as THREE from 'three';
 import { Chunk } from './world/chunk.js';
-import { TerrainGenerator } from './world/terrain.js';
-import { BlockType } from './world/block-types.js';
+import { TerrainGenerator, BIOME } from './world/terrain.js';
+import { BlockID, isBlockSolid, initBlockTextures } from './blocks/Block.js';
+import './blocks/index.js';
 
-const RENDER_DISTANCE = 4; // Raio em chunks
-const CHUNK_SIZE = 16;
+const RD = 4, CS = 16, CH = 256;
 
 export class Game {
-  constructor(scene, camera, domElement) {
-    this.scene = scene;
-    this.camera = camera;
-    this.domElement = domElement;
-
-    this.chunks = new Map(); // key: "x,y,z" → Chunk
+  constructor(scene, camera, dom) {
+    this.scene = scene; this.camera = camera; this.domElement = dom;
+    initBlockTextures();
+    this.chunks = new Map();
     this.terrain = new TerrainGenerator(42);
-
-    // Centro do mundo (onde começa o jogador)
-    this.centerChunkX = 0;
-    this.centerChunkZ = 0;
-
-    this.lastUpdateTime = 0;
+    this.cx = 0; this.cz = 0; this.throttle = 0;
   }
 
-  /**
-   * Gera key única para chunk
-   */
-  chunkKey(cx, cy, cz) {
-    return `${cx},${cy},${cz}`;
+  key(cx,cz){return `${cx},${cz}`;}
+
+  getBlockAt(wx,wy,wz){
+    const cx=Math.floor(wx/CS),cz=Math.floor(wz/CS);
+    const ch=this.chunks.get(this.key(cx,cz));
+    if(!ch)return BlockID.AIR;
+    const lx=((wx%CS)+CS)%CS,lz=((wz%CS)+CS)%CS,ly=Math.floor(wy);
+    if(ly<0||ly>=CH)return BlockID.AIR;
+    return ch.getBlock(lx,ly,lz);
   }
 
-  /**
-   * Obtém chunk num ponto global
-   */
-  getChunkAt(worldX, worldY, worldZ) {
-    const cx = Math.floor(worldX / CHUNK_SIZE);
-    const cy = Math.floor(worldY / CHUNK_SIZE);
-    const cz = Math.floor(worldZ / CHUNK_SIZE);
-    return this.chunks.get(this.chunkKey(cx, cy, cz));
-  }
+  getNeighborBlock(gx,gy,gz){return this.getBlockAt(Math.floor(gx),gy,Math.floor(gz));}
 
-  /**
-   * Obtém bloco num ponto global
-   */
-  getBlockAt(worldX, worldY, worldZ) {
-    const cx = Math.floor(worldX / CHUNK_SIZE);
-    const cy = Math.floor(worldY / CHUNK_SIZE);
-    const cz = Math.floor(worldZ / CHUNK_SIZE);
-    const chunk = this.chunks.get(this.chunkKey(cx, cy, cz));
-    
-    if (!chunk) return BlockType.AIR;
-
-    const lx = ((worldX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const ly = ((worldY % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const lz = ((worldZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-
-    return chunk.getBlock(lx, ly, lz);
-  }
-
-  /**
-   * Callback para chunk buscar vizinho (usado no mesh generation)
-   */
-  getNeighborForChunk(chunk, localX, localY, localZ) {
-    const globalX = chunk.chunkX * CHUNK_SIZE + localX;
-    const globalY = chunk.chunkY * CHUNK_SIZE + localY;
-    const globalZ = chunk.chunkZ * CHUNK_SIZE + localZ;
-    return this.getBlockAt(globalX, globalY, globalZ);
-  }
-
-  /**
-   * Atualiza chunks carregados ao redor do jogador
-   */
-  updateChunks(playerX, playerZ) {
-    const playerChunkX = Math.floor(playerX / CHUNK_SIZE);
-    const playerChunkZ = Math.floor(playerZ / CHUNK_SIZE);
-
-    // Se mudou de chunk, recarrega
-    if (playerChunkX !== this.centerChunkX || playerChunkZ !== this.centerChunkZ) {
-      this.centerChunkX = playerChunkX;
-      this.centerChunkZ = playerChunkZ;
-      this._loadChunks();
+  updateChunks(px,pz){
+    const pcx=Math.floor(px/CS),pcz=Math.floor(pz/CS);
+    if(pcx===this.cx&&pcz===this.cz)return;
+    this.cx=pcx;this.cz=pcz;
+    const loaded=new Set();
+    for(let dx=-RD;dx<=RD;dx++)for(let dz=-RD;dz<=RD;dz++){
+      const cx=this.cx+dx,cz=this.cz+dz,k=this.key(cx,cz);
+      loaded.add(k);
+      if(!this.chunks.has(k)){const ch=new Chunk(cx,cz);this.terrain.generateChunk(ch);this.chunks.set(k,ch);}
     }
+    for(const [k,ch] of this.chunks){if(!loaded.has(k)){ch.dispose(this.scene);this.chunks.delete(k);}}
+    for(const [,ch] of this.chunks) ch.buildMesh(this.scene,(gx,gy,gz)=>this.getNeighborBlock(gx,gy,gz));
   }
 
-  /**
-   * Carrega todos os chunks no render distance
-   */
-  _loadChunks() {
-    const loaded = new Set();
+  update(pos){this.throttle++;if(this.throttle>=10){this.throttle=0;this.updateChunks(pos.x,pos.z);}}
 
-    // Gera chunks num grid ao redor do centro
-    for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; dx++) {
-      for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; dz++) {
-        const cx = this.centerChunkX + dx;
-        const cz = this.centerChunkZ + dz;
+  isSolidAt(wx,wy,wz){return isBlockSolid(this.getBlockAt(Math.floor(wx),Math.floor(wy),Math.floor(wz)));}
 
-        const key = this.chunkKey(cx, 0, cz);
-        loaded.add(key);
-
-        if (!this.chunks.has(key)) {
-          const chunk = new Chunk(cx, 0, cz);
-          this.terrain.generateChunk(chunk);
-          this.chunks.set(key, chunk);
-        }
-      }
-    }
-
-    // Descarrega chunks distantes
-    for (const [key, chunk] of this.chunks) {
-      if (!loaded.has(key)) {
-        chunk.dispose(this.scene);
-        this.chunks.delete(key);
-      }
-    }
-
-    // Rebuild meshes
-    for (const [key, chunk] of this.chunks) {
-      chunk.buildMesh(this.scene, (lx, ly, lz) => this.getNeighborForChunk(chunk, lx, ly, lz));
-    }
+  getSpawnPosition(){
+    const sx=8,sz=8,h=this.terrain.getHeight(sx,sz);
+    let sy=h+3;
+    if(h<=this.terrain.seaLevel)sy=this.terrain.seaLevel+3;
+    return new THREE.Vector3(sx,sy,sz);
   }
 
-  /**
-   * Atualiza chunks periodicamente (para physics)
-   */
-  update(playerPosition) {
-    this.updateChunks(playerPosition.x, playerPosition.z);
-  }
-
-  /**
-   * Verifica se há bloco solido nas cords
-   */
-  isSolidAt(worldX, worldY, worldZ) {
-    const block = this.getBlockAt(
-      Math.floor(worldX),
-      Math.floor(worldY),
-      Math.floor(worldZ)
-    );
-    const solidBlocks = [1, 2, 3, 4, 5, 7, 8];
-    return solidBlocks.includes(block);
-  }
-
-  /**
-   * Posição inicial do spawn
-   */
-  getSpawnPosition() {
-    const height = this.terrain.getHeight(8, 8);
-    return new THREE.Vector3(8, height + 3, 8);
+  getBiomeAt(x,z){
+    const b=this.terrain.getBiome(x,z);
+    return {0:'Planície',1:'Floresta',2:'Deserto',3:'Neve'}[b]||'?';
   }
 }

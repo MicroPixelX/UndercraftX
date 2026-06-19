@@ -1,48 +1,13 @@
 /**
- * HUD: crosshair, info de debug
+ * hud.js: FPS + posição + bioma
  */
-
 export class HUD {
-  constructor() {
-    this.hudElement = document.getElementById('hud');
-    this.fps = 0;
-    this.frameCount = 0;
-    this.lastTime = performance.now();
+  constructor(){this.el=document.getElementById('hud');this.fps=0;this.fc=0;this.lt=performance.now();}
+  update(pos,chunk,biome=''){
+    this.fc++;const n=performance.now();
+    if(n-this.lt>=1000){this.fps=this.fc;this.fc=0;this.lt=n;}
+    this.el.innerHTML=`<div>FPS: ${this.fps}</div><div>X:${Math.floor(pos.x)} Y:${Math.floor(pos.y)} Z:${Math.floor(pos.z)}</div><div>Chunk: ${chunk.x},${chunk.z}</div>${biome?`<div>Bioma: ${biome}</div>`:''}`;
   }
-
-  /**
-   * Atualiza info de FPS e posição
-   */
-  update(playerPosition, chunkCoords) {
-    // FPS counter
-    this.frameCount++;
-    const now = performance.now();
-    if (now - this.lastTime >= 1000) {
-      this.fps = this.frameCount;
-      this.frameCount = 0;
-      this.lastTime = now;
-    }
-
-    // Info
-    const p = playerPosition;
-    this.hudElement.innerHTML = `
-      <div>FPS: ${this.fps}</div>
-      <div>X: ${Math.floor(p.x)} Y: ${Math.floor(p.y)} Z: ${Math.floor(p.z)}</div>
-      <div>Chunk: ${chunkCoords.x}, ${chunkCoords.z}</div>
-    `;
-  }
-
-  /**
-   * Esconde HUD
-   */
-  hide() {
-    this.hudElement.style.display = 'none';
-  }
-
-  /**
-   * Mostra HUD
-   */
-  show() {
-    this.hudElement.style.display = 'block';
-  }
+  hide(){this.el.style.display='none';}
+  show(){this.el.style.display='block';}
 }
