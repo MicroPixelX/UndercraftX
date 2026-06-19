@@ -1,6 +1,6 @@
 /**
  * main.js: Entry point
- * Corrigido: pointer lock robusto, ordem de inicialização segura
+ * + Seed input para gerar mundos diferentes
  */
 import '../style.css';
 import { Renderer } from './renderer/renderer.js';
@@ -13,6 +13,7 @@ class UndercraftX {
     this.container = document.getElementById('game-container');
     this.startScreen = document.getElementById('start-screen');
     this.startBtn = document.getElementById('start-btn');
+    this.seedInput = document.getElementById('seed-input');
     this.isRunning = false; this.lastTime = 0;
     this._init();
   }
@@ -26,20 +27,34 @@ class UndercraftX {
     this.container.addEventListener('click', () => {
       if (this.isRunning) this.container.requestPointerLock();
     });
-    // Corrigido: pointer lock change lida com todos os estados
     document.addEventListener('pointerlockchange', () => {
       if (this.player) {
         this.player.isLocked = document.pointerLockElement === this.container;
       }
     });
-    // Corrigido: prevenir contexto ao clicar com botão direito no container
     this.container.addEventListener('contextmenu', e => e.preventDefault());
   }
 
+  _getSeed() {
+    // Seed do input ou hash do texto
+    const val = this.seedInput ? this.seedInput.value.trim() : '';
+    if (!val) return 42; // default seed
+    const num = parseInt(val, 10);
+    if (!isNaN(num) && val === String(num)) return num;
+    // Hash string → número
+    let hash = 0;
+    for (let i = 0; i < val.length; i++) {
+      const ch = val.charCodeAt(i);
+      hash = ((hash << 5) - hash + ch) | 0;
+    }
+    return Math.abs(hash) || 42;
+  }
+
   _start() {
+    const seed = this._getSeed();
     this.startScreen.style.display = 'none';
     this.hud.show();
-    this.game = new Game(this.scene, this.camera, this.container);
+    this.game = new Game(this.scene, this.camera, this.container, seed);
     this.player = new Player(this.camera, this.container);
     const spawn = this.game.getSpawnPosition();
     this.player.position.copy(spawn);
@@ -47,6 +62,7 @@ class UndercraftX {
     this.container.requestPointerLock();
     this.player.isLocked = true;
     this.isRunning = true; this.lastTime = performance.now();
+    this.hud.setSeed(seed);
     requestAnimationFrame(t => this._loop(t));
   }
 

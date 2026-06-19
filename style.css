@@ -113,3 +113,34 @@ body {
   font-size: 13px;
   color: #666;
 }
+
+.seed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.seed-row label {
+  font-size: 16px;
+  color: #aaa;
+}
+
+.seed-row input {
+  padding: 8px 14px;
+  font-size: 14px;
+  font-family: 'Courier New', monospace;
+  background: #2a2a4a;
+  color: #ddd;
+  border: 1px solid #4a4a6a;
+  width: 260px;
+  outline: none;
+}
+
+.seed-row input:focus {
+  border-color: #7a7aaa;
+}
+
+.seed-row input::placeholder {
+  color: #555;
+}
