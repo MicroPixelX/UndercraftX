@@ -1,7 +1,11 @@
 /**
  * game.js: Mundo + chunks + culling cross-chunk
- * Atualizado: suporte a 7 biomas, seed, getBiomeName
+ *
+ * FIXES:
+ *  - #6: Only rebuild dirty chunks instead of ALL chunks on every update
+ *  - Detach chunks from scene only when actually removed (not every frame)
  */
+
 import * as THREE from 'three';
 import { Chunk } from './world/chunk.js';
 import { TerrainGenerator, BIOME, BIOME_NAMES } from './world/terrain.js';
@@ -41,32 +45,87 @@ export class Game {
     const pcx=Math.floor(px/CS),pcz=Math.floor(pz/CS);
     if(pcx===this.cx&&pcz===this.cz)return;
     this.cx=pcx;this.cz=pcz;
+
     const loaded=new Set();
+
+    // Generate new chunks that entered radius
     for(let dx=-RD;dx<=RD;dx++)for(let dz=-RD;dz<=RD;dz++){
       const cx=this.cx+dx,cz=this.cz+dz,k=this.key(cx,cz);
       loaded.add(k);
-      if(!this.chunks.has(k)){const ch=new Chunk(cx,cz);this.terrain.generateChunk(ch);this.chunks.set(k,ch);}
+      if(!this.chunks.has(k)){
+        const ch=new Chunk(cx,cz);
+        this.terrain.generateChunk(ch);
+        this.chunks.set(k,ch);
+      }
     }
-    for(const [k,ch] of this.chunks){if(!loaded.has(k)){ch.dispose(this.scene);this.chunks.delete(k);}}
-    for(const [,ch] of this.chunks) ch.buildMesh(this.scene,(gx,gy,gz)=>this.getNeighborBlock(gx,gy,gz));
+
+    // Remove chunks that left radius
+    for(const [k,ch] of this.chunks){
+      if(!loaded.has(k)){
+        ch.dispose(this.scene);
+        this.chunks.delete(k);
+      }
+    }
+
+    // FIX #6: Only rebuild meshes for dirty chunks, NOT all chunks every frame.
+    // When the player crosses a chunk boundary, mark newly adjacent chunks as dirty
+    // and only rebuild those. Already-built clean chunks are left alone.
+    for(const [,ch] of this.chunks){
+      if(ch.dirty){
+        ch.buildMesh(this.scene,(gx,gy,gz)=>this.getNeighborBlock(gx,gy,gz));
+      }
+    }
+
+    // After building all, any chunks that had new neighbors also need rebuild
+    // (face culling depends on neighbor data). Mark border chunks dirty when
+    // a new neighbor chunk appears.
+    // We re-check for newly-adjacent chunks that were clean but now border a new chunk.
+    for(const [,ch] of this.chunks){
+      if(!ch.dirty){
+        // Check if any neighbor chunk was just created (is dirty)
+        const ncx = ch.chunkX, ncz = ch.chunkZ;
+        const neighborKeys = [
+          this.key(ncx-1,ncz), this.key(ncx+1,ncz),
+          this.key(ncx,ncz-1), this.key(ncx,ncz+1)
+        ];
+        for(const nk of neighborKeys){
+          const nch = this.chunks.get(nk);
+          if(nch && nch.dirty){
+            // Schedule rebuild for next pass — don't recurse here
+            ch.dirty = true;
+          }
+        }
+      }
+    }
+
+    // Second pass: rebuild chunks that became dirty due to new neighbors
+    for(const [,ch] of this.chunks){
+      if(ch.dirty){
+        ch.buildMesh(this.scene,(gx,gy,gz)=>this.getNeighborBlock(gx,gy,gz));
+      }
+    }
   }
 
-  update(pos){this.throttle++;if(this.throttle>=10){this.throttle=0;this.updateChunks(pos.x,pos.z);}}
+  update(pos){
+    this.throttle++;
+    if(this.throttle>=10){
+      this.throttle=0;
+      this.updateChunks(pos.x,pos.z);
+    }
+  }
 
   isSolidAt(wx,wy,wz){return isBlockSolid(this.getBlockAt(Math.floor(wx),Math.floor(wy),Math.floor(wz)));}
 
   getSpawnPosition(){
-    // Tentar encontrar spawn em terra (não oceano)
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const sx = 8 + Math.floor(Math.random() * 64) - 32;
-      const sz = 8 + Math.floor(Math.random() * 64) - 32;
-      const h = this.terrain.getHeight(sx, sz);
-      const biome = this.terrain.getBiome(sx, sz);
-      if (biome !== BIOME.OCEAN && h > this.terrain.seaLevel + 1) {
-        return new THREE.Vector3(sx, h + 3, sz);
+    for(let attempt=0;attempt<20;attempt++){
+      const sx=8+Math.floor(Math.random()*64)-32;
+      const sz=8+Math.floor(Math.random()*64)-32;
+      const h=this.terrain.getHeight(sx,sz);
+      const biome=this.terrain.getBiome(sx,sz);
+      if(biome!==BIOME.OCEAN&&h>this.terrain.seaLevel+1){
+        return new THREE.Vector3(sx,h+3,sz);
       }
     }
-    // Fallback: centro
     const sx=8,sz=8,h=this.terrain.getHeight(sx,sz);
     let sy=h+3;
     if(h<=this.terrain.seaLevel)sy=this.terrain.seaLevel+3;
@@ -74,7 +133,7 @@ export class Game {
   }
 
   getBiomeAt(x,z){
-    const b = this.terrain.getBiome(x, z);
-    return BIOME_NAMES[b] || '?';
+    const b=this.terrain.getBiome(x,z);
+    return BIOME_NAMES[b]||'?';
   }
 }

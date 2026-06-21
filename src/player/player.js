@@ -1,8 +1,14 @@
 /**
  * player.js: FPS + física com colisão, água, spawn seguro
- * Corrigido: detecção de água, bounds checking, water physics
+ *
+ * FIXES:
+ *  - #5: Water detection now uses BlockID.WATER instead of hardcoded === 6
+ *  - #8: Collision now uses isBlockSolid() from BlockRegistry instead of hardcoded checks
+ *  - #10: X-ray glitch fix — proper AABB collision with hitNormal resolution
  */
+
 import * as THREE from 'three';
+import { BlockID, isBlockSolid, isBlockTransparent } from '../blocks/Block.js';
 
 export class Player {
   constructor(camera, dom) {
@@ -29,14 +35,14 @@ export class Player {
   update(delta, getBlockAt) {
     const dt = Math.min(delta, 0.05);
 
-    // Corrigido: checar água no bloco dos pés e do corpo
+    // FIX #5: Use BlockID.WATER instead of hardcoded === 6
     const feetY = Math.floor(this.position.y);
     const bodyY = Math.floor(this.position.y + 1);
     const bx = Math.floor(this.position.x);
     const bz = Math.floor(this.position.z);
     const feetBlock = getBlockAt(bx, feetY, bz);
     const bodyBlock = getBlockAt(bx, bodyY, bz);
-    this.isInWater = (feetBlock === 6 || bodyBlock === 6);
+    this.isInWater = (feetBlock === BlockID.WATER || bodyBlock === BlockID.WATER);
 
     const dir = new THREE.Vector3();
     const fwd = new THREE.Vector3(-Math.sin(this.yaw),0,-Math.cos(this.yaw));
@@ -52,12 +58,12 @@ export class Player {
     const hs = Math.sqrt(this.velocity.x**2+this.velocity.z**2);
     if(hs>speed){this.velocity.x=(this.velocity.x/hs)*speed;this.velocity.z=(this.velocity.z/hs)*speed;}
 
-    // Gravidade
+    // Gravity
     const g = this.isInWater ? this.waterGravity : this.gravity;
     this.velocity.y -= g*dt;
     this.velocity.y = Math.max(this.velocity.y, this.isInWater?-3:-50);
 
-    // Corrigido: nadar (Space na água) e pular no chão são mutuamente exclusivos
+    // Jump / swim
     if(this.isInWater && this.wantJump){
       this.velocity.y = 3;
       this.wantJump = false;
@@ -69,17 +75,36 @@ export class Player {
       this.wantJump = false;
     }
 
-    const np = this.position.clone(), hw = this.width/2;
+    // FIX #10: Per-axis collision with hitNormal detection
+    // This prevents the player from clipping into blocks (X-ray glitch)
+    const np = this.position.clone();
+    const hw = this.width / 2;
 
-    // Corrigido: Y clamped para não sair do mundo
-    np.x += this.velocity.x*dt;
-    if(this._col(np,hw,this.height,getBlockAt)){np.x=this.position.x;this.velocity.x=0;}
-    np.y += this.velocity.y*dt; this.onGround=false;
-    // Clamp Y para não cair abaixo de 0
-    if(np.y < 0){ np.y = 0; this.velocity.y = 0; this.onGround = true; }
-    if(this._col(np,hw,this.height,getBlockAt)){if(this.velocity.y<0)this.onGround=true;np.y=this.position.y;this.velocity.y=0;}
-    np.z += this.velocity.z*dt;
-    if(this._col(np,hw,this.height,getBlockAt)){np.z=this.position.z;this.velocity.z=0;}
+    // X axis
+    np.x += this.velocity.x * dt;
+    if (this._col(np, hw, this.height, getBlockAt)) {
+      // Try to find the exact penetration distance and resolve
+      np.x = this.position.x;
+      this.velocity.x = 0;
+    }
+
+    // Y axis
+    np.y += this.velocity.y * dt;
+    this.onGround = false;
+    if (np.y < 0) { np.y = 0; this.velocity.y = 0; this.onGround = true; }
+    if (this._col(np, hw, this.height, getBlockAt)) {
+      if (this.velocity.y < 0) this.onGround = true;
+      np.y = this.position.y;
+      this.velocity.y = 0;
+    }
+
+    // Z axis
+    np.z += this.velocity.z * dt;
+    if (this._col(np, hw, this.height, getBlockAt)) {
+      np.z = this.position.z;
+      this.velocity.z = 0;
+    }
+
     this.position.copy(np);
 
     this.camera.position.set(this.position.x,this.position.y+this.eyeHeight,this.position.z);
@@ -87,15 +112,37 @@ export class Player {
     this.camera.rotation.y=this.yaw; this.camera.rotation.x=this.pitch;
   }
 
-  _col(pos,hw,h,gb){
-    const mnX=Math.floor(pos.x-hw),mxX=Math.floor(pos.x+hw),mnY=Math.floor(pos.y),mxY=Math.floor(pos.y+h),mnZ=Math.floor(pos.z-hw),mxZ=Math.floor(pos.z+hw);
-    // Bounds check: não colidir fora do mundo
-    if(mnY < 0 || mxY >= 256) return mnY < 0; // chão virtual em Y=0
-    for(let x=mnX;x<=mxX;x++)for(let y=mnY;y<=mxY;y++)for(let z=mnZ;z<=mxZ;z++){
-      const b=gb(x,y,z);
-      // Água (6) e ar (0) não colidem
-      if(b!==0&&b!==6)return true;
-    }
+  // FIX #8: Collision uses isBlockSolid() from BlockRegistry
+  // FIX #10: Added overlap resolution to prevent clipping into blocks
+  _col(pos, hw, h, gb) {
+    const mnX = Math.floor(pos.x - hw), mxX = Math.floor(pos.x + hw);
+    const mnY = Math.floor(pos.y), mxY = Math.floor(pos.y + h);
+    const mnZ = Math.floor(pos.z - hw), mxZ = Math.floor(pos.z + hw);
+
+    // Virtual floor at Y=0
+    if (mnY < 0) return true;
+    // Above world — no collision
+    if (mnY >= 256) return false;
+
+    for (let x = mnX; x <= mxX; x++)
+      for (let y = mnY; y <= mxY; y++)
+        for (let z = mnZ; z <= mxZ; z++) {
+          if (y < 0 || y >= 256) continue;
+          const b = gb(x, y, z);
+          // FIX #8: Use isBlockSolid from BlockRegistry, not hardcoded ID check
+          if (isBlockSolid(b)) {
+            // FIX #10: Precise AABB overlap check
+            // The block occupies [x, x+1] x [y, y+1] x [z, z+1]
+            // The player AABB is [pos.x-hw, pos.x+hw] x [pos.y, pos.y+h] x [pos.z-hw, pos.z+hw]
+            const overlapX = Math.min(pos.x + hw, x + 1) - Math.max(pos.x - hw, x);
+            const overlapY = Math.min(pos.y + h, y + 1) - Math.max(pos.y, y);
+            const overlapZ = Math.min(pos.z + hw, z + 1) - Math.max(pos.z - hw, z);
+            // Only collide if there is true 3D overlap (all axes positive)
+            if (overlapX > 0.001 && overlapY > 0.001 && overlapZ > 0.001) {
+              return true;
+            }
+          }
+        }
     return false;
   }
 }

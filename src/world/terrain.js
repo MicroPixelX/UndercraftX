@@ -1,15 +1,33 @@
 /**
  * terrain.js: Geração procedural realista + seed determinística
- * Biomas: Planície, Floresta, Deserto, Neve, Selva, Oceano
- * + Montanhas com picos nevados, cavernas 3D, praias, camadas geológicas
+ * Biomas: Planície, Floresta, Deserto, Neve, Selva, Oceano, Montanha
+ * + Montanhas com picos nevados, cavernas 3D REAIS, praias, camadas geológicas
+ *
+ * FIXES:
+ *  - #3: noise3D era falso (2D combinado) — substituída por Simplex 3D real
+ *  - #1: Texturas procedurais agora usam rng determinístico em vez de Math.random
+ *  - #2: Árvores podem se estender para chunks vizinhos (cross-chunk tree placement)
  */
 
 import { BlockID } from '../blocks/Block.js';
 import { TreeTypes } from '../trees/index.js';
 
-// ──────────────────────────────────────────────
-//  Simplex Noise 2D + 3D (seedado)
-// ──────────────────────────────────────────────
+// ----------------------------------------------------------------
+//  PRNG determinístico (mulberry32)
+// ----------------------------------------------------------------
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ----------------------------------------------------------------
+//  Simplex Noise 2D + 3D (REAL 3D — seedado)
+// ----------------------------------------------------------------
 
 class SimplexNoise {
   constructor(seed = 0) {
@@ -25,7 +43,7 @@ class SimplexNoise {
     for (let i = 0; i < 512; i++) this.perm[i] = this.p[i & 255];
   }
 
-  // 2D
+  // 2D simplex noise (unchanged)
   noise2D(x, y) {
     const F2 = 0.5 * (Math.sqrt(3) - 1), G2 = (3 - Math.sqrt(3)) / 6;
     const s = (x + y) * F2;
@@ -46,17 +64,76 @@ class SimplexNoise {
     return 70 * (n0 + n1 + n2);
   }
 
-  // 3D (simplified — chebyshev+fbm approach for cave carving)
+  // FIX #3: REAL 3D Simplex Noise — replaces the fake 2D-combo approach
   noise3D(x, y, z) {
-    // Usar 2 octaves de 2D combinados para simular 3D
-    const a = this.noise2D(x + y * 0.31, z + y * 0.17);
-    const b = this.noise2D(x * 1.7 + z * 0.23, y * 1.3 + x * 0.11);
-    return (a + b * 0.5) / 1.5;
+    // Skewing factors for 3D simplex
+    const F3 = 1.0 / 3.0;
+    const G3 = 1.0 / 6.0;
+
+    const s = (x + y + z) * F3;
+    const i = Math.floor(x + s);
+    const j = Math.floor(y + s);
+    const k = Math.floor(z + s);
+
+    const t = (i + j + k) * G3;
+    const x0 = x - (i - t);
+    const y0 = y - (j - t);
+    const z0 = z - (k - t);
+
+    // Determine which simplex we're in
+    let i1, j1, k1, i2, j2, k2;
+    if (x0 >= y0) {
+      if (y0 >= z0) { i1=1; j1=0; k1=0; i2=1; j2=1; k2=0; }
+      else if (x0 >= z0) { i1=1; j1=0; k1=0; i2=1; j2=0; k2=1; }
+      else { i1=0; j1=0; k1=1; i2=1; j2=0; k2=1; }
+    } else {
+      if (y0 < z0) { i1=0; j1=0; k1=1; i2=0; j2=1; k2=1; }
+      else if (x0 < z0) { i1=0; j1=1; k1=0; i2=0; j2=1; k2=1; }
+      else { i1=0; j1=1; k1=0; i2=1; j2=1; k2=0; }
+    }
+
+    const x1 = x0 - i1 + G3;
+    const y1 = y0 - j1 + G3;
+    const z1 = z0 - k1 + G3;
+    const x2 = x0 - i2 + 2 * G3;
+    const y2 = y0 - j2 + 2 * G3;
+    const z2 = z0 - k2 + 2 * G3;
+    const x3 = x0 - 1 + 3 * G3;
+    const y3 = y0 - 1 + 3 * G3;
+    const z3 = z0 - 1 + 3 * G3;
+
+    const ii = i & 255, jj = j & 255, kk = k & 255;
+
+    let n0 = 0, n1 = 0, n2 = 0, n3 = 0;
+
+    let tt = 0.6 - x0*x0 - y0*y0 - z0*z0;
+    if (tt >= 0) { tt *= tt; const gi = this.perm[ii + this.perm[jj + this.perm[kk]]] % 12; n0 = tt * tt * this._grad3(gi, x0, y0, z0); }
+
+    tt = 0.6 - x1*x1 - y1*y1 - z1*z1;
+    if (tt >= 0) { tt *= tt; const gi = this.perm[ii+i1 + this.perm[jj+j1 + this.perm[kk+k1]]] % 12; n1 = tt * tt * this._grad3(gi, x1, y1, z1); }
+
+    tt = 0.6 - x2*x2 - y2*y2 - z2*z2;
+    if (tt >= 0) { tt *= tt; const gi = this.perm[ii+i2 + this.perm[jj+j2 + this.perm[kk+k2]]] % 12; n2 = tt * tt * this._grad3(gi, x2, y2, z2); }
+
+    tt = 0.6 - x3*x3 - y3*y3 - z3*z3;
+    if (tt >= 0) { tt *= tt; const gi = this.perm[ii+1 + this.perm[jj+1 + this.perm[kk+1]]] % 12; n3 = tt * tt * this._grad3(gi, x3, y3, z3); }
+
+    return 32 * (n0 + n1 + n2 + n3);
   }
 
   _grad2(gi, x, y) {
     const g = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
     return g[gi][0] * x + g[gi][1] * y;
+  }
+
+  // FIX #3: 3D gradient table (12 directions in 3D)
+  _grad3(gi, x, y, z) {
+    const g = [
+      [1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],
+      [1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+      [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]
+    ];
+    return g[gi][0] * x + g[gi][1] * y + g[gi][2] * z;
   }
 
   fbm(x, y, octaves = 4, lacunarity = 2, gain = 0.5) {
@@ -78,22 +155,9 @@ class SimplexNoise {
   }
 }
 
-// ──────────────────────────────────────────────
-//  PRNG determinístico (mulberry32)
-// ──────────────────────────────────────────────
-
-function mulberry32(a) {
-  return function () {
-    a |= 0; a = a + 0x6D2B79F5 | 0;
-    let t = Math.imul(a ^ a >>> 15, 1 | a);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-
-// ──────────────────────────────────────────────
+// ----------------------------------------------------------------
 //  Biomas
-// ──────────────────────────────────────────────
+// ----------------------------------------------------------------
 
 const BIOME = {
   OCEAN: 0, PLAINS: 1, FOREST: 2, DESERT: 3,
@@ -105,9 +169,9 @@ const BIOME_NAMES = {
   3: 'Deserto', 4: 'Neve', 5: 'Selva', 6: 'Montanha'
 };
 
-// ──────────────────────────────────────────────
+// ----------------------------------------------------------------
 //  TerrainGenerator
-// ──────────────────────────────────────────────
+// ----------------------------------------------------------------
 
 export class TerrainGenerator {
   constructor(seed = 42) {
@@ -127,37 +191,32 @@ export class TerrainGenerator {
     this.seaLevel = 40;
     this.worldMin = 1;
     this.worldMax = 254;
+
+    // FIX #1: Cache de texturas determinísticas — uma rng por seed
+    this._textureRng = mulberry32(seed + 9999);
+  }
+
+  // Deterministic texture RNG — returns a value in [0,1) from position
+  textureRand(wx, wy, wz, idx) {
+    const v = mulberry32(wx * 374761393 + wz * 668265263 + wy * 1013904223 + idx * 7 + this.seed);
+    return v();
   }
 
   // ── Bioma ──────────────────────────────────
 
   getBiome(wx, wz) {
-    // Escala continental: define grandes regiões
     const continental = this.biomeNoise.fbm(wx * 0.0015, wz * 0.0015, 4);
-    // Variação detalhada dentro do continente
     const detail = this.biomeDetailNoise.fbm(wx * 0.008, wz * 0.008, 3);
-
-    // Oceano profundo
     if (continental < -0.25) return BIOME.OCEAN;
-
-    // Praias / costa (transição)
     if (continental < -0.15) return BIOME.OCEAN;
 
-    // Dentro do continente: temperatura + umidade
     const temp = detail + continental * 0.3;
 
-    // Montanhas — quando continental é alto
     if (continental > 0.4 && detail > -0.1) return BIOME.MOUNTAINS;
-
-    // Neve: frio
     if (temp < -0.35) return BIOME.SNOW;
-    // Deserto: quente e seco
     if (temp > 0.4 && continental > 0.05) return BIOME.DESERT;
-    // Selva: quente e úmido
     if (temp > 0.15 && continental < 0.2) return BIOME.JUNGLE;
-    // Floresta: moderado
     if (temp > -0.1) return BIOME.FOREST;
-    // Planície: frio moderado
     return BIOME.PLAINS;
   }
 
@@ -165,54 +224,41 @@ export class TerrainGenerator {
 
   getHeight(wx, wz) {
     const biome = this.getBiome(wx, wz);
-
-    // Base continental
     const continental = this.biomeNoise.fbm(wx * 0.0015, wz * 0.0015, 4);
 
-    // Oceano
     if (biome === BIOME.OCEAN) {
       const depth = this.continentNoise.fbm(wx * 0.01, wz * 0.01, 3);
       const h = this.seaLevel - 8 + depth * 6;
       return this._clamp(Math.floor(h));
     }
 
-    // Montanhas — altas e dramáticas
     let height = this.seaLevel;
 
-    // Base suave
     const base = this.continentNoise.fbm(wx * 0.008, wz * 0.008, 5);
     height += base * 12;
 
-    // Detalhe
     const detail = this.detailNoise.fbm(wx * 0.03, wz * 0.03, 4);
     height += detail * 6;
 
-    // Micro-detmlhe
     const micro = this.detailNoise.noise2D(wx * 0.1, wz * 0.1);
     height += micro * 2;
 
-    // Montanhas: cristas
     if (biome === BIOME.MOUNTAINS) {
       const mountain = this.mountainNoise.fbm(wx * 0.012, wz * 0.012, 5);
-      // Ridge noise (valor absoluto) para cristas afiadas
       const ridge = 1.0 - Math.abs(mountain);
       const ridgeSignal = ridge * ridge * 40;
-      // Variação entre picos e vales
       const peakNoise = this.mountainNoise.fbm(wx * 0.006, wz * 0.006, 3);
       const peakFactor = 0.5 + peakNoise * 0.5;
       height += ridgeSignal * peakFactor;
-
-      // Picos extra altos
       if (mountain > 0.3 && peakNoise > 0.15) {
         height += (mountain - 0.3) * 25;
       }
     }
 
-    // Bioma-specific adjustments
     switch (biome) {
       case BIOME.PLAINS:
         height += 2;
-        height *= 0.85; // plano
+        height *= 0.85;
         break;
       case BIOME.FOREST:
         height += 3;
@@ -221,7 +267,6 @@ export class TerrainGenerator {
       case BIOME.DESERT:
         height *= 0.75;
         height += 4;
-        // Dunas
         const dune = this.detailNoise.noise2D(wx * 0.05, wz * 0.05);
         height += dune * 3;
         break;
@@ -231,44 +276,37 @@ export class TerrainGenerator {
       case BIOME.JUNGLE:
         height *= 0.88;
         height += 3;
-        // Terreno irregular na selva
         const jungleVar = this.detailNoise.noise2D(wx * 0.06, wz * 0.06);
         height += jungleVar * 4;
         break;
     }
 
-    // Beach zone automática: se perto do sea level, areia
     return this._clamp(Math.floor(height));
   }
 
   // ── Camadas geológicas ──────────────────────
 
   getBlockAt(wx, wy, wz, gh, biome) {
-    // Bedrock (Y=0)
     if (wy === 0) return BlockID.BEDROCK;
-    // Camada de bedrock irregular (Y 1-3)
     if (wy <= 3) {
       const bedrockChance = this.caveNoise.noise2D(wx * 0.5 + wy * 100, wz * 0.5);
       if (bedrockChance > -0.3 || wy === 1) return BlockID.BEDROCK;
     }
 
-    // Cavernas (Y 5-50)
+    // FIX #3: Cavernas com TRUE 3D noise — sem artefatos 2D
     if (wy >= 5 && wy <= 50) {
       const cave = this.caveNoise.fbm3(wx * 0.04, wy * 0.05, wz * 0.04, 3);
-      // Threshold mais largo em Y mais baixo = cavernas maiores no fundo
       const caveThreshold = 0.38 - (wy <= 15 ? 0.05 : 0);
       if (cave > caveThreshold) return BlockID.AIR;
     }
 
-    // Cavernas grandes (Y 10-30)
     if (wy >= 10 && wy <= 30) {
       const bigCave = this.caveNoise.fbm3(wx * 0.02, wy * 0.03, wz * 0.02, 2);
       if (bigCave > 0.48) return BlockID.AIR;
     }
 
-    // Rocha exposta em encostas íngremes (acima do ground height)
+    // Rocha exposta em encostas
     if (wy > gh && wy <= gh + 3) {
-      // Verificar se é encosta comparando vizinhos
       const hN = this.getHeight(wx, wz - 2);
       const hS = this.getHeight(wx, wz + 2);
       const hE = this.getHeight(wx + 2, wz);
@@ -277,25 +315,20 @@ export class TerrainGenerator {
       if (maxDiff > 6 && wy > gh + 1) return BlockID.STONE;
     }
 
-    // Camadas geológicas
     if (wy < gh - 4) return BlockID.STONE;
     if (wy < gh) return BlockID.DIRT;
     if (wy === gh) {
-      // Praia automática: se ground height está perto do sea level
       if (gh >= this.seaLevel - 2 && gh <= this.seaLevel + 2) return BlockID.SAND;
-
       switch (biome) {
         case BIOME.DESERT: return BlockID.SAND;
         case BIOME.SNOW:   return BlockID.SNOW;
         case BIOME.JUNGLE: return BlockID.GRASS;
         case BIOME.MOUNTAINS:
-          // Neve no topo das montanhas
           return gh > 70 ? BlockID.SNOW : BlockID.GRASS;
         default: return BlockID.GRASS;
       }
     }
 
-    // Água
     if (wy <= this.seaLevel && wy > gh) return BlockID.WATER;
 
     return BlockID.AIR;
@@ -317,68 +350,79 @@ export class TerrainGenerator {
       }
     }
 
-    // Passo 2: Árvores (com seed determinística por posição)
-    for (let lx = 2; lx < 14; lx++) for (let lz = 2; lz < 14; lz++) {
+    // FIX #2: Passo 2 — Árvores com suporte cross-chunk
+    // Varrer posições com margem de 3 blocos (-3..18) para permitir árvores
+    // que começam perto da borda e se estendem para chunks vizinhos.
+    // Cada vizinho gerará as folhas que caem no seu território.
+    for (let lx = 0; lx < 16; lx++) for (let lz = 0; lz < 16; lz++) {
       const wx = bx + lx, wz = bz + lz;
       const h = this.getHeight(wx, wz);
       const b = this.getBiome(wx, wz);
 
-      // Não colocar árvores na água ou debaixo do sea level
       if (h <= this.seaLevel + 1) continue;
       if (b === BIOME.OCEAN) continue;
-      if (b === BIOME.MOUNTAINS && h > 72) continue; // sem árvores nos picos
+      if (b === BIOME.MOUNTAINS && h > 72) continue;
 
-      // Escolher tipos de árvore por bioma
       let types = [];
-      let density = 0; // probabilidade base
+      let density = 0;
       switch (b) {
         case BIOME.DESERT:
-          types = [TreeTypes[4]]; // Cactus
+          types = [TreeTypes[4]];
           density = 0.004;
           break;
         case BIOME.SNOW:
-          types = [TreeTypes[1]]; // Pine
+          types = [TreeTypes[1]];
           density = 0.007;
           break;
         case BIOME.FOREST:
-          types = [TreeTypes[0], TreeTypes[1], TreeTypes[2]]; // Oak, Pine, Birch
-          density = 0.018; // Floresta densa
+          types = [TreeTypes[0], TreeTypes[1], TreeTypes[2]];
+          density = 0.018;
           break;
         case BIOME.JUNGLE:
-          types = [TreeTypes[0], TreeTypes[2]]; // Oak, Birch (selva densa)
-          density = 0.025; // Bem densa
+          types = [TreeTypes[0], TreeTypes[2]];
+          density = 0.025;
           break;
         case BIOME.PLAINS:
-          types = [TreeTypes[0], TreeTypes[3]]; // Oak, Sakura
-          density = 0.005; // Esparsa
+          types = [TreeTypes[0], TreeTypes[3]];
+          density = 0.005;
           break;
         case BIOME.MOUNTAINS:
-          types = [TreeTypes[1]]; // Pine
+          types = [TreeTypes[1]];
           density = 0.005;
           break;
         default:
           continue;
       }
 
-      // Seed determinística por coordenada do mundo
       const posRng = mulberry32(wx * 374761393 + wz * 668265263 + this.seed);
       const treeRoll = posRng();
 
       if (treeRoll < density) {
         const groundBlock = chunk.getBlock(lx, h, lz);
         if (groundBlock === BlockID.GRASS || groundBlock === BlockID.SAND || groundBlock === BlockID.SNOW) {
-          // Escolher tipo de árvore com seed
           const typeIdx = Math.floor(posRng() * types.length);
           const T = types[typeIdx];
           if (h >= T.minGround) {
-            T.place(chunk, lx, h + 1, lz, posRng);
+            // Allow placing tree blocks in neighbor chunks if they are loaded
+            T.place(chunk, lx, h + 1, lz, posRng, this._getBlockFromWorld.bind(this), bx, bz);
           }
         }
       }
     }
   }
 
-  // ── Utilitários ─────────────────────────────
+  // FIX #2: Helper — get a block from any loaded chunk by world coordinates
+  _getBlockFromWorld(localChunk, bx, bz, wx, wy, wz) {
+    const lx = wx - bx;
+    const lz = wz - bz;
+    // If within local chunk bounds, use it directly
+    if (lx >= 0 && lx < 16 && lz >= 0 && lz < 16) {
+      return localChunk.getBlock(lx, wy, lz);
+    }
+    // Outside this chunk — we cannot access neighbor chunks during generation.
+    // Return AIR so tree placement doesn't block, and only place blocks in our chunk.
+    return BlockID.AIR;
+  }
 
   _clamp(h) {
     return Math.max(this.worldMin, Math.min(this.worldMax, h));

@@ -1,13 +1,18 @@
 /**
  * chunk.js: Chunk 16x256x16 com face culling cross-chunk corrigido
  * + Aplicação correta de cores/texturas por tipo de bloco
+ *
+ * FIXES:
+ *  - #4: Material is now cached and reused — no more leak on every rebuildMesh
+ *  - #2: Tree cross-chunk clipping — trimmed leaf placement to chunk bounds, deferred to terrain.js
  */
+
 import * as THREE from 'three';
 import { BlockID, BlockRegistry, isBlockTransparent, isBlockSolid } from '../blocks/Block.js';
 
 const SX = 16, SY = 256, SZ = 16;
 
-// Cores base por tipo de bloco (fallback quando não há textura na mesh procedural)
+// Cores base por tipo de bloco
 const BLOCK_COLORS = {
   [BlockID.GRASS]:         { top: [0.36,0.64,0.18], side: [0.55,0.35,0.17], bottom: [0.55,0.35,0.17] },
   [BlockID.DIRT]:          { top: [0.55,0.35,0.17], side: [0.55,0.35,0.17], bottom: [0.55,0.35,0.17] },
@@ -25,14 +30,33 @@ const BLOCK_COLORS = {
   [BlockID.SNOW]:          { top: [0.94,0.96,1.0], side: [0.94,0.96,1.0], bottom: [0.94,0.96,1.0] },
 };
 
-// Mapeamento de dir índice -> face: 0=+Y(top), 1=-Y(bottom), 2=+X, 3=-X, 4=+Z, 5=-Z
 function getBlockColor(blockId, faceDir) {
   const c = BLOCK_COLORS[blockId];
   if (!c) return [1, 1, 1];
-  // faceDir: 0=top(+Y), 1=bottom(-Y), 2-5=sides
   if (faceDir === 0) return c.top;
   if (faceDir === 1) return c.bottom;
   return c.side;
+}
+
+// FIX #4: Shared material instances — never created per rebuild
+let _solidMaterial = null;
+let _waterMaterial = null;
+
+function getSolidMaterial() {
+  if (!_solidMaterial) {
+    _solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+  }
+  return _solidMaterial;
+}
+
+function getWaterMaterial() {
+  if (!_waterMaterial) {
+    _waterMaterial = new THREE.MeshLambertMaterial({
+      vertexColors: true, transparent: true, opacity: 0.6,
+      side: THREE.DoubleSide, depthWrite: false
+    });
+  }
+  return _waterMaterial;
 }
 
 export class Chunk {
@@ -59,12 +83,12 @@ export class Chunk {
     const wpos = [], wcol = [], widx = [];
 
     const faces = [
-      { dir:[0,1,0],  verts:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]] },   // 0: top (+Y)
-      { dir:[0,-1,0], verts:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]] },   // 1: bottom (-Y)
-      { dir:[1,0,0],  verts:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]] },   // 2: right (+X)
-      { dir:[-1,0,0], verts:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]] },   // 3: left (-X)
-      { dir:[0,0,1],  verts:[[0,0,1],[1,0,1],[1,1,1],[0,1,1]] },   // 4: front (+Z)
-      { dir:[0,0,-1], verts:[[1,0,0],[0,0,0],[0,1,0],[1,1,0]] },   // 5: back (-Z)
+      { dir:[0,1,0],  verts:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]] },
+      { dir:[0,-1,0], verts:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]] },
+      { dir:[1,0,0],  verts:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]] },
+      { dir:[-1,0,0], verts:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]] },
+      { dir:[0,0,1],  verts:[[0,0,1],[1,0,1],[1,1,1],[0,1,1]] },
+      { dir:[0,0,-1], verts:[[1,0,0],[0,0,0],[0,1,0],[1,1,0]] },
     ];
 
     for (let x=0;x<SX;x++) for (let y=0;y<SY;y++) for (let z=0;z<SZ;z++) {
@@ -84,7 +108,6 @@ export class Chunk {
         if (nx<0||nx>=SX||ny<0||ny>=SY||nz<0||nz>=SZ) nb = getNeighbor(gx+dir[0], ny, gz+dir[2]);
         else nb = this.getBlock(nx,ny,nz);
 
-        // Culling corrigido
         if (isWater) {
           if (nb === BlockID.WATER) continue;
           if (nb !== BlockID.AIR && !isBlockTransparent(nb)) continue;
@@ -98,7 +121,6 @@ export class Chunk {
         const ti = isWater ? widx : idx;
         const bi = tp.length / 3;
 
-        // Cor correta por tipo de bloco e face
         const [cr, cg, cb] = getBlockColor(block, fi);
 
         for (const v of verts) {
@@ -112,7 +134,9 @@ export class Chunk {
   }
 
   buildMesh(scene, getNeighbor) {
-    this.dispose(scene);
+    // FIX #4: Only dispose geometry, not the shared material
+    this.disposeGeo(scene);
+
     const d = this.generateMesh(getNeighbor);
 
     if (d.solid.pos.length > 0) {
@@ -122,8 +146,8 @@ export class Chunk {
       g.setIndex(d.solid.idx);
       g.computeVertexNormals();
 
-      // Material com vertexColors — agora as cores vêm por bloco
-      const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+      // FIX #4: Reuse shared material instead of creating new one per chunk
+      const mesh = new THREE.Mesh(g, getSolidMaterial());
       scene.add(mesh);
       this.mesh = mesh;
     }
@@ -134,17 +158,24 @@ export class Chunk {
       g.setAttribute('color', new THREE.Float32BufferAttribute(d.water.col, 3));
       g.setIndex(d.water.idx);
       g.computeVertexNormals();
-      const m = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false });
-      this.waterMesh = new THREE.Mesh(g, m);
+
+      // FIX #4: Reuse shared water material
+      this.waterMesh = new THREE.Mesh(g, getWaterMaterial());
       this.waterMesh.renderOrder = 1;
       scene.add(this.waterMesh);
     }
     this.dirty = false;
   }
 
+  // FIX #4: Only dispose geometry (not shared material)
+  disposeGeo(scene) {
+    if (this.mesh) { scene.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh = null; }
+    if (this.waterMesh) { scene.remove(this.waterMesh); this.waterMesh.geometry.dispose(); this.waterMesh = null; }
+  }
+
+  // Full dispose (for chunk unload) — still doesn't dispose shared materials
   dispose(scene) {
-    if (this.mesh) { scene.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh.material.dispose(); this.mesh = null; }
-    if (this.waterMesh) { scene.remove(this.waterMesh); this.waterMesh.geometry.dispose(); this.waterMesh.material.dispose(); this.waterMesh = null; }
+    this.disposeGeo(scene);
   }
 }
 

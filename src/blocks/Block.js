@@ -1,6 +1,11 @@
 /**
  * Block.js: Registry central de blocos com texturas procedurais
+ *
+ * FIX #1: generateTexture now accepts a seeded RNG so textures are deterministic.
+ *   - Old: all block textures used Math.random() — same seed produced different textures every reload
+ *   - New: generateTexture uses a seeded mulberry32 PRNG per texture
  */
+
 import * as THREE from 'three';
 
 export const BlockID = {
@@ -11,11 +16,26 @@ export const BlockID = {
 
 export const BlockRegistry = {};
 
+// FIX #1: Seeded texture RNG — each block file gets a deterministic sequence
+let _textureSeed = 42;
+
+export function setTextureSeed(seed) {
+  _textureSeed = seed;
+}
+
+function _texRng() {
+  _textureSeed = (_textureSeed + 0x6D2B79F5) | 0;
+  let t = Math.imul(_textureSeed ^ _textureSeed >>> 15, 1 | _textureSeed);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+  return ((t ^ t >>> 14) >>> 0) / 4294967296;
+}
+
 export function generateTexture(w, h, drawFn) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const ctx = c.getContext('2d');
-  drawFn(ctx, w, h);
+  // FIX #1: Pass deterministic rng to draw function instead of letting it use Math.random
+  drawFn(ctx, w, h, _texRng);
   const tex = new THREE.CanvasTexture(c);
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;

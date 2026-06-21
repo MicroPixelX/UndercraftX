@@ -1,12 +1,16 @@
 /**
  * main.js: Entry point
  * + Seed input para gerar mundos diferentes
+ *
+ * FIX #1: Seed is now passed to texture generator for deterministic textures
  */
+
 import '../style.css';
 import { Renderer } from './renderer/renderer.js';
 import { Player } from './player/player.js';
 import { Game } from './game.js';
 import { HUD } from './ui/hud.js';
+import { setTextureSeed } from './blocks/index.js';
 
 class UndercraftX {
   constructor() {
@@ -36,12 +40,10 @@ class UndercraftX {
   }
 
   _getSeed() {
-    // Seed do input ou hash do texto
     const val = this.seedInput ? this.seedInput.value.trim() : '';
-    if (!val) return 42; // default seed
+    if (!val) return 42;
     const num = parseInt(val, 10);
     if (!isNaN(num) && val === String(num)) return num;
-    // Hash string → número
     let hash = 0;
     for (let i = 0; i < val.length; i++) {
       const ch = val.charCodeAt(i);
@@ -52,6 +54,10 @@ class UndercraftX {
 
   _start() {
     const seed = this._getSeed();
+
+    // FIX #1: Set texture seed before block initialization so textures are deterministic
+    setTextureSeed(seed);
+
     this.startScreen.style.display = 'none';
     this.hud.show();
     this.game = new Game(this.scene, this.camera, this.container, seed);
