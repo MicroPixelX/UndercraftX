@@ -264,21 +264,23 @@ export class TerrainGenerator {
         height += 3;
         height *= 0.9;
         break;
-      case BIOME.DESERT:
+      case BIOME.DESERT: {
         height *= 0.75;
         height += 4;
         const dune = this.detailNoise.noise2D(wx * 0.05, wz * 0.05);
         height += dune * 3;
         break;
+      }
       case BIOME.SNOW:
         height += 5;
         break;
-      case BIOME.JUNGLE:
+      case BIOME.JUNGLE: {
         height *= 0.88;
         height += 3;
         const jungleVar = this.detailNoise.noise2D(wx * 0.06, wz * 0.06);
         height += jungleVar * 4;
         break;
+      }
     }
 
     return this._clamp(Math.floor(height));

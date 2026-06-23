@@ -4,6 +4,11 @@
  * FIX #1: generateTexture now accepts a seeded RNG so textures are deterministic.
  *   - Old: all block textures used Math.random() — same seed produced different textures every reload
  *   - New: generateTexture uses a seeded mulberry32 PRNG per texture
+ *
+ * FIX #11: Texture generation is now lazy (deferred until initBlockTextures is called).
+ *   - Old: block modules called generateTexture() at module-evaluation time, BEFORE setTextureSeed()
+ *   - New: block modules register a drawFn factory; textures are created inside initBlockTextures()
+ *          which runs AFTER setTextureSeed(seed) in main.js — making the seed actually effective.
  */
 
 import * as THREE from 'three';
@@ -30,12 +35,21 @@ function _texRng() {
   return ((t ^ t >>> 14) >>> 0) / 4294967296;
 }
 
+// FIX #11: generateTexture now returns a lazy descriptor instead of creating the
+// texture immediately. The actual CanvasTexture is created in initBlockTextures()
+// after setTextureSeed() has been called with the player's chosen seed.
 export function generateTexture(w, h, drawFn) {
+  // Return a descriptor object that will be resolved later
+  return { _lazy: true, w, h, drawFn };
+}
+
+// Internal: actually create a THREE.CanvasTexture from a lazy descriptor
+function _resolveTexture(desc) {
+  if (!desc || !desc._lazy) return desc; // already resolved or null
   const c = document.createElement('canvas');
-  c.width = w; c.height = h;
+  c.width = desc.w; c.height = desc.h;
   const ctx = c.getContext('2d');
-  // FIX #1: Pass deterministic rng to draw function instead of letting it use Math.random
-  drawFn(ctx, w, h, _texRng);
+  desc.drawFn(ctx, desc.w, desc.h, _texRng);
   const tex = new THREE.CanvasTexture(c);
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
@@ -59,12 +73,26 @@ export function registerBlock(id, def) {
     id, name: def.name || '?', solid: def.solid ?? true,
     transparent: def.transparent || false, opacity: def.opacity ?? 1,
     materials: null, createMaterials: def.createMaterials || null,
+    // FIX #11: Store lazy texture descriptors for deferred resolution
+    _lazyTextures: def._lazyTextures || null,
   };
 }
 
 export function initBlockTextures() {
-  for (const [id, block] of Object.entries(BlockRegistry)) {
-    if (block.createMaterials) block.materials = block.createMaterials();
+  // FIX #11: Walk every registered block and resolve lazy texture descriptors
+  // before calling createMaterials(). This ensures the seeded RNG is used.
+  for (const [, block] of Object.entries(BlockRegistry)) {
+    if (block._lazyTextures) {
+      // Resolve each lazy texture descriptor into a real THREE.Texture
+      const resolved = {};
+      for (const [key, desc] of Object.entries(block._lazyTextures)) {
+        resolved[key] = _resolveTexture(desc);
+      }
+      block._resolvedTextures = resolved;
+    }
+    if (block.createMaterials) {
+      block.materials = block.createMaterials(block._resolvedTextures || {});
+    }
   }
 }
 
