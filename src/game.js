@@ -4,10 +4,11 @@
  * FIXES:
  *  - #6: Only rebuild dirty chunks instead of ALL chunks on every update
  *  - #11: getSpawnPosition now uses the seeded PRNG instead of Math.random()
- *  - #12: updateChunks double-rebuild fix — new chunks are built in a single pass.
- *  - FIX-G: getSpawnPosition now checks that the spawn area is clear of solid blocks
- *           (trees, etc.) before placing the player. Tries up to 20 positions,
- *           and for each position, verifies the player AABB is free.
+ *  - #12: updateChunks double-rebuild fix
+ *  - FIX-G: getSpawnPosition checks that the spawn area is clear of solid blocks
+ *  - FIX-P: getBlockAt now floors wx and wz — prevents wrong block lookups
+ *           when called with float coordinates from player collision
+ *  - FIX-Q: updateChunks throttle starts at threshold so first update() runs immediately
  */
 
 import * as THREE from 'three';
@@ -18,7 +19,6 @@ import './blocks/index.js';
 
 const RD = 4, CS = 16, CH = 256;
 
-// Deterministic PRNG (mulberry32) — same as in terrain.js
 function mulberry32(a) {
   return function () {
     a |= 0; a = a + 0x6D2B79F5 | 0;
@@ -36,12 +36,17 @@ export class Game {
     initBlockTextures();
     this.chunks = new Map();
     this.terrain = new TerrainGenerator(seed);
-    this.cx = NaN; this.cz = NaN; this.throttle = 0;
+    this.cx = NaN; this.cz = NaN;
+    // FIX-Q: Start throttle at threshold so first update() runs immediately
+    this.throttle = 9;
   }
 
   key(cx,cz){return `${cx},${cz}`;}
 
+  // FIX-P: Floor wx/wz to handle float coordinates from player collision
   getBlockAt(wx,wy,wz){
+    wx = Math.floor(wx);
+    wz = Math.floor(wz);
     const iy = Math.floor(wy);
     if(iy < 0 || iy >= CH) return BlockID.AIR;
     const cx=Math.floor(wx/CS),cz=Math.floor(wz/CS);
@@ -115,11 +120,9 @@ export class Game {
 
   isSolidAt(wx,wy,wz){return isBlockSolid(this.getBlockAt(Math.floor(wx),Math.floor(wy),Math.floor(wz)));}
 
-  // FIX-G: Check if a position is clear for the player (no solid blocks in their AABB)
   _isSpawnClear(sx, sy, sz) {
-    const hw = 0.3; // player half-width
-    const mh = 1.8; // player height
-    // Check all block positions the player AABB would overlap
+    const hw = 0.3;
+    const mh = 1.8;
     for (let x = Math.floor(sx - hw); x <= Math.floor(sx + hw); x++)
       for (let y = Math.floor(sy); y <= Math.floor(sy + mh); y++)
         for (let z = Math.floor(sz - hw); z <= Math.floor(sz + hw); z++) {
@@ -136,14 +139,12 @@ export class Game {
       const h=this.terrain.getHeight(sx,sz);
       const biome=this.terrain.getBiome(sx,sz);
       if(biome!==BIOME.OCEAN&&h>this.terrain.seaLevel+1){
-        const sy = h + 1; // spawn just above ground
-        // FIX-G: Verify the spawn area is clear of solid blocks (trees etc.)
+        const sy = h + 1;
         if (this._isSpawnClear(sx, sy, sz)) {
           return new THREE.Vector3(sx, sy, sz);
         }
       }
     }
-    // Fallback — use default position and hope for the best
     const sx=8,sz=8,h=this.terrain.getHeight(sx,sz);
     let sy=Math.max(h+1,this.terrain.seaLevel+2);
     return new THREE.Vector3(sx,sy,sz);
@@ -152,5 +153,15 @@ export class Game {
   getBiomeAt(x,z){
     const b=this.terrain.getBiome(x,z);
     return BIOME_NAMES[b]||'?';
+  }
+
+  // FIX-O: Allow disposal of all chunks (for game restart)
+  dispose() {
+    for (const [,ch] of this.chunks) {
+      ch.dispose(this.scene);
+    }
+    this.chunks.clear();
+    this.cx = NaN;
+    this.cz = NaN;
   }
 }
