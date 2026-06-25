@@ -14,7 +14,8 @@ import * as THREE from 'three';
 export const BlockID = {
   AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, WOOD: 4, LEAVES: 5,
   WATER: 6, SAND: 7, BEDROCK: 8, OAK_LOG: 9, PINE_LOG: 10,
-  BIRCH_LOG: 11, SAKURA_LEAVES: 12, CACTUS: 13, SNOW: 14
+  BIRCH_LOG: 11, SAKURA_LEAVES: 12, CACTUS: 13, SNOW: 14,
+  ROSE: 15, DANDELION: 16, TALL_GRASS: 17, COAL_ORE: 18, IRON_ORE: 19
 };
 
 export const BlockRegistry = {};
