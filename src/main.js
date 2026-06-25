@@ -3,6 +3,8 @@
  * + Seed input para gerar mundos diferentes
  *
  * FIX #1: Seed is now passed to texture generator for deterministic textures
+ * FIX-O: Double-click guard on start button — prevents creating duplicate
+ *        Game/Player instances and leaking old chunk meshes from memory
  */
 
 import '../style.css';
@@ -19,6 +21,7 @@ class UndercraftX {
     this.startBtn = document.getElementById('start-btn');
     this.seedInput = document.getElementById('seed-input');
     this.isRunning = false; this.lastTime = 0;
+    this._started = false; // FIX-O: Guard against double-click
     this._init();
   }
 
@@ -53,10 +56,19 @@ class UndercraftX {
   }
 
   _start() {
+    // FIX-O: Prevent double-click from creating duplicate Game/Player
+    if (this._started) return;
+    this._started = true;
+
     const seed = this._getSeed();
 
-    // FIX #1: Set texture seed before block initialization so textures are deterministic
     setTextureSeed(seed);
+
+    // FIX-O: Dispose old game if restarting (future-proofing)
+    if (this.game) {
+      this.game.dispose();
+      this.game = null;
+    }
 
     this.startScreen.style.display = 'none';
     this.hud.show();
