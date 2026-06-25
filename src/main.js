@@ -3,8 +3,9 @@
  * + Seed input para gerar mundos diferentes
  *
  * FIX #1: Seed is now passed to texture generator for deterministic textures
- * FIX-O: Double-click guard on start button — prevents creating duplicate
- *        Game/Player instances and leaking old chunk meshes from memory
+ * FIX-O: Double-click guard on start button
+ * FIX-V2: _started flag is reset after disposal so true restart is possible
+ * FIX-V1: Old Player is disposed (event listeners removed) before creating new one
  */
 
 import '../style.css';
@@ -20,8 +21,9 @@ class UndercraftX {
     this.startScreen = document.getElementById('start-screen');
     this.startBtn = document.getElementById('start-btn');
     this.seedInput = document.getElementById('seed-input');
-    this.isRunning = false; this.lastTime = 0;
-    this._started = false; // FIX-O: Guard against double-click
+    this.isRunning = false;
+    this.lastTime = 0;
+    this._started = false;
     this._init();
   }
 
@@ -56,7 +58,6 @@ class UndercraftX {
   }
 
   _start() {
-    // FIX-O: Prevent double-click from creating duplicate Game/Player
     if (this._started) return;
     this._started = true;
 
@@ -64,10 +65,15 @@ class UndercraftX {
 
     setTextureSeed(seed);
 
-    // FIX-O: Dispose old game if restarting (future-proofing)
     if (this.game) {
       this.game.dispose();
       this.game = null;
+    }
+
+    // FIX-V1: Dispose old player before creating new one — removes stale event listeners
+    if (this.player) {
+      this.player.dispose();
+      this.player = null;
     }
 
     this.startScreen.style.display = 'none';
@@ -79,7 +85,8 @@ class UndercraftX {
     this.game.updateChunks(spawn.x, spawn.z);
     this.container.requestPointerLock();
     this.player.isLocked = true;
-    this.isRunning = true; this.lastTime = performance.now();
+    this.isRunning = true;
+    this.lastTime = performance.now();
     this.hud.setSeed(seed);
     requestAnimationFrame(t => this._loop(t));
   }
@@ -88,13 +95,14 @@ class UndercraftX {
     if (!this.isRunning) return;
     const dt = Math.min((now - this.lastTime) / 1000, 0.1);
     this.lastTime = now;
-    this.player.update(dt, (x,y,z) => this.game.getBlockAt(x,y,z));
+    this.player.update(dt, (x, y, z) => this.game.getBlockAt(x, y, z));
     this.game.update(this.player.position);
     this.renderer.updateSky(this.camera.position);
     this.renderer.render();
-    const pcx = Math.floor(this.player.position.x/16), pcz = Math.floor(this.player.position.z/16);
+    const pcx = Math.floor(this.player.position.x / 16);
+    const pcz = Math.floor(this.player.position.z / 16);
     const biome = this.game.getBiomeAt(Math.floor(this.player.position.x), Math.floor(this.player.position.z));
-    this.hud.update(this.player.position, {x:pcx,z:pcz}, biome);
+    this.hud.update(this.player.position, { x: pcx, z: pcz }, biome);
     requestAnimationFrame(t => this._loop(t));
   }
 }
