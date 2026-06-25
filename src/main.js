@@ -14,6 +14,7 @@ import { Player } from './player/player.js';
 import { Game } from './game.js';
 import { HUD } from './ui/hud.js';
 import { setTextureSeed } from './blocks/index.js';
+import { clearWaterMaterialCache } from './world/chunk.js';
 
 class UndercraftX {
   constructor() {
@@ -33,15 +34,18 @@ class UndercraftX {
     this.scene = this.renderer.scene;
     this.hud = new HUD(); this.hud.hide();
     this.startBtn.addEventListener('click', () => this._start());
-    this.container.addEventListener('click', () => {
+    this._onContainerClick = () => {
       if (this.isRunning) this.container.requestPointerLock();
-    });
-    document.addEventListener('pointerlockchange', () => {
+    };
+    this.container.addEventListener('click', this._onContainerClick);
+    this._onPointerLockChange = () => {
       if (this.player) {
         this.player.isLocked = document.pointerLockElement === this.container;
       }
-    });
-    this.container.addEventListener('contextmenu', e => e.preventDefault());
+    };
+    document.addEventListener('pointerlockchange', this._onPointerLockChange);
+    this._onContextMenu = e => e.preventDefault();
+    this.container.addEventListener('contextmenu', this._onContextMenu);
   }
 
   _getSeed() {
@@ -70,22 +74,28 @@ class UndercraftX {
       this.game = null;
     }
 
-    // FIX-V1: Dispose old player before creating new one — removes stale event listeners
     if (this.player) {
       this.player.dispose();
       this.player = null;
     }
 
-    // FIX-W2: Clear cached water materials — dispose GPU resources, prevent stale refs
     clearWaterMaterialCache();
 
-    // FIX-W3: Reset _started flag so the Start button works after a game ends
-    this._started = false;
+    if (this.renderer) {
+      this.renderer.dispose();
+    }
+
+    this.container.removeEventListener('click', this._onContainerClick);
+    document.removeEventListener('pointerlockchange', this._onPointerLockChange);
+    this.container.removeEventListener('contextmenu', this._onContextMenu);
 
     this.startScreen.style.display = 'none';
     this.hud.show();
     this.game = new Game(this.scene, this.camera, this.container, seed);
     this.player = new Player(this.camera, this.container);
+    this.container.addEventListener('click', this._onContainerClick);
+    document.addEventListener('pointerlockchange', this._onPointerLockChange);
+    this.container.addEventListener('contextmenu', this._onContextMenu);
     const spawn = this.game.getSpawnPosition();
     this.player.position.copy(spawn);
     this.game.updateChunks(spawn.x, spawn.z);
@@ -95,6 +105,7 @@ class UndercraftX {
     this.lastTime = performance.now();
     this.hud.setSeed(seed);
     requestAnimationFrame(t => this._loop(t));
+    this._started = false;
   }
 
   _loop(now) {
