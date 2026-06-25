@@ -33,7 +33,6 @@ class UndercraftX {
     this.camera = this.renderer.camera;
     this.scene = this.renderer.scene;
     this.hud = new HUD(); this.hud.hide();
-    this.waterOverlay = document.getElementById('water-overlay');
     this.startBtn.addEventListener('click', () => this._start());
     this._onContainerClick = () => {
       if (this.isRunning) this.container.requestPointerLock();
@@ -127,9 +126,7 @@ class UndercraftX {
     this.renderer.updateSky(this.camera.position);
     this.renderer.render();
 
-    if (this.waterOverlay) {
-      this.waterOverlay.style.display = this.player.isInWater ? 'block' : 'none';
-    }
+    this.renderer.isUnderwater = this.player.isInWater;
 
     const pcx = Math.floor(this.player.position.x / 16);
     const pcz = Math.floor(this.player.position.z / 16);
