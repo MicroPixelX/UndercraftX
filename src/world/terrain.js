@@ -376,6 +376,54 @@ export class TerrainGenerator {
         }
       }
     }
+
+    for (let lx = 0; lx < 16; lx++) for (let lz = 0; lz < 16; lz++) {
+      const wx = bx + lx, wz = bz + lz;
+      const h = heightCache[lx * 16 + lz];
+      const b = biomeCache[lx * 16 + lz];
+
+      if (h <= this.seaLevel) continue;
+      if (b === BIOME.OCEAN || b === BIOME.DESERT) continue;
+
+      const groundBlock = chunk.getBlock(lx, h, lz);
+      if (groundBlock !== BlockID.GRASS && groundBlock !== BlockID.SNOW) continue;
+
+      const decorRng = mulberry32(wx * 9234567 + wz * 7654321 + this.seed * 31);
+      const decorRoll = decorRng();
+
+      if (b === BIOME.PLAINS || b === BIOME.FOREST || b === BIOME.JUNGLE || b === BIOME.SNOW) {
+        if (decorRoll < 0.08) {
+          if (chunk.getBlock(lx, h + 1, lz) === BlockID.AIR) {
+            const flowerRoll = decorRng();
+            if (b === BIOME.JUNGLE || b === BIOME.FOREST) {
+              chunk.setBlock(lx, h + 1, lz, flowerRoll < 0.5 ? BlockID.ROSE : BlockID.DANDELION);
+            } else if (b === BIOME.PLAINS) {
+              chunk.setBlock(lx, h + 1, lz, flowerRoll < 0.35 ? BlockID.ROSE : BlockID.DANDELION);
+            } else if (b === BIOME.SNOW) {
+              if (flowerRoll < 0.15) chunk.setBlock(lx, h + 1, lz, BlockID.ROSE);
+            }
+          }
+        } else if (decorRoll < 0.25) {
+          if (chunk.getBlock(lx, h + 1, lz) === BlockID.AIR) {
+            chunk.setBlock(lx, h + 1, lz, BlockID.TALL_GRASS);
+          }
+        }
+      }
+    }
+
+    for (let ly = 5; ly < 40; ly++) {
+      for (let lx = 0; lx < 16; lx++) for (let lz = 0; lz < 16; lz++) {
+        if (chunk.getBlock(lx, ly, lz) !== BlockID.STONE) continue;
+        const wx = bx + lx, wz = bz + lz;
+        const oreRng = mulberry32(wx * 1111111 + ly * 2222222 + wz * 3333333 + this.seed * 7);
+        const oreRoll = oreRng();
+        if (oreRoll < 0.012) {
+          const veinSize = 4 + Math.floor(oreRng() * 5);
+          const oreId = ly < 20 ? BlockID.IRON_ORE : BlockID.COAL_ORE;
+          this._placeOreVein(chunk, lx, ly, lz, oreId, veinSize, oreRng, bx, bz);
+        }
+      }
+    }
   }
 
   _getOceanHeight(wx, wz) {
@@ -391,6 +439,23 @@ export class TerrainGenerator {
       return localChunk.getBlock(lx, wy, lz);
     }
     return BlockID.AIR;
+  }
+
+  _placeOreVein(chunk, lx, ly, lz, oreId, size, rng, bx, bz) {
+    const dx = [1,0,-1,0,0,0,1,1,-1,-1,0,0,1,-1,0,0,1,1,-1,-1];
+    const dy = [0,0,0,0,1,-1,1,-1,1,-1,1,1,-1,-1,1,-1,0,0,0,0];
+    const dz = [0,1,0,-1,0,0,1,-1,-1,1,1,-1,1,-1,0,0,0,0,1,-1];
+    chunk.setBlock(lx, ly, lz, oreId);
+    let cx = lx, cy = ly, cz = lz;
+    for (let i = 1; i < size; i++) {
+      const di = Math.floor(rng() * dx.length);
+      cx += dx[di]; cy += dy[di]; cz += dz[di];
+      if (cx >= 0 && cx < 16 && cz >= 0 && cz < 16 && cy >= 1 && cy < 256) {
+        if (chunk.getBlock(cx, cy, cz) === BlockID.STONE) {
+          chunk.setBlock(cx, cy, cz, oreId);
+        }
+      }
+    }
   }
 
   _clamp(h) {
