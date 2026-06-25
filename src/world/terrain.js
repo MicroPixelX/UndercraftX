@@ -1,15 +1,15 @@
 /**
  * terrain.js: Geração procedural realista + seed determinística
- * Biomas: Planície, Floresta, Deserto, Neve, Selva, Oceano, Montanha
- * + Montanhas com picos nevados, cavernas 3D REAIS, praias, camadas geológicas
+ * Biomas: Planície, Floresta, Deserto, Neve, Selva, Montanha
+ * + Montanhas com picos nevados, cavernas 3D, praias, camadas geológicas
  *
- * FIXES:
- *  - #3: noise3D — substituída por Simplex 3D real
- *  - #1: Texturas procedurais agora usam rng determinístico
- *  - FIX-S: Removed misleading cross-chunk tree placement code — trees are
- *           confined to their own chunk (with boundary clamping in tree place()
- *           methods). Cross-chunk tree canopies are clipped at chunk edges,
- *           which is acceptable and honest vs. pretending it works.
+ * CHANGES from original:
+ *  - Smaller oceans (threshold shifted, depth reduced)
+ *  - Smoother terrain with less extreme noise variation (fewer floating blocks)
+ *  - Caves are fewer, smaller, and deeper-only (no giant holes at surface)
+ *  - Beaches are wider and more natural
+ *  - Terrain height is more gently rolling (no sudden cliffs creating floating overhangs)
+ *  - Overhang detection: stone fills under overhangs to prevent floating terrain
  */
 
 import { BlockID } from '../blocks/Block.js';
@@ -59,16 +59,11 @@ class SimplexNoise {
   }
 
   noise3D(x, y, z) {
-    const F3 = 1.0 / 3.0;
-    const G3 = 1.0 / 6.0;
+    const F3 = 1.0 / 3.0, G3 = 1.0 / 6.0;
     const s = (x + y + z) * F3;
-    const i = Math.floor(x + s);
-    const j = Math.floor(y + s);
-    const k = Math.floor(z + s);
+    const i = Math.floor(x + s), j = Math.floor(y + s), k = Math.floor(z + s);
     const t = (i + j + k) * G3;
-    const x0 = x - (i - t);
-    const y0 = y - (j - t);
-    const z0 = z - (k - t);
+    const x0 = x - (i - t), y0 = y - (j - t), z0 = z - (k - t);
     let i1, j1, k1, i2, j2, k2;
     if (x0 >= y0) {
       if (y0 >= z0) { i1=1; j1=0; k1=0; i2=1; j2=1; k2=0; }
@@ -79,15 +74,9 @@ class SimplexNoise {
       else if (x0 < z0) { i1=0; j1=1; k1=0; i2=0; j2=1; k2=1; }
       else { i1=0; j1=1; k1=0; i2=1; j2=1; k2=0; }
     }
-    const x1 = x0 - i1 + G3;
-    const y1 = y0 - j1 + G3;
-    const z1 = z0 - k1 + G3;
-    const x2 = x0 - i2 + 2 * G3;
-    const y2 = y0 - j2 + 2 * G3;
-    const z2 = z0 - k2 + 2 * G3;
-    const x3 = x0 - 1 + 3 * G3;
-    const y3 = y0 - 1 + 3 * G3;
-    const z3 = z0 - 1 + 3 * G3;
+    const x1 = x0 - i1 + G3, y1 = y0 - j1 + G3, z1 = z0 - k1 + G3;
+    const x2 = x0 - i2 + 2 * G3, y2 = y0 - j2 + 2 * G3, z2 = z0 - k2 + 2 * G3;
+    const x3 = x0 - 1 + 3 * G3, y3 = y0 - 1 + 3 * G3, z3 = z0 - 1 + 3 * G3;
     const ii = i & 255, jj = j & 255, kk = k & 255;
     let n0 = 0, n1 = 0, n2 = 0, n3 = 0;
     let tt = 0.6 - x0*x0 - y0*y0 - z0*z0;
@@ -107,11 +96,7 @@ class SimplexNoise {
   }
 
   _grad3(gi, x, y, z) {
-    const g = [
-      [1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],
-      [1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
-      [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]
-    ];
+    const g = [[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],[0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]];
     return g[gi][0] * x + g[gi][1] * y + g[gi][2] * z;
   }
 
@@ -169,8 +154,10 @@ export class TerrainGenerator {
   getBiome(wx, wz) {
     const continental = this.biomeNoise.fbm(wx * 0.0015, wz * 0.0015, 4);
     const detail = this.biomeDetailNoise.fbm(wx * 0.008, wz * 0.008, 3);
-    if (continental < -0.25) return BIOME.OCEAN;
-    if (continental < -0.15) return BIOME.OCEAN;
+
+    // Smaller oceans: only the deepest continental values become ocean
+    if (continental < -0.40) return BIOME.OCEAN;
+
     const temp = detail + continental * 0.3;
     if (continental > 0.4 && detail > -0.1) return BIOME.MOUNTAINS;
     if (temp < -0.35) return BIOME.SNOW;
@@ -183,56 +170,69 @@ export class TerrainGenerator {
   getHeight(wx, wz) {
     const biome = this.getBiome(wx, wz);
     const continental = this.biomeNoise.fbm(wx * 0.0015, wz * 0.0015, 4);
+
     if (biome === BIOME.OCEAN) {
+      // Shallower oceans — only 3-6 blocks deep instead of 8-14
       const depth = this.continentNoise.fbm(wx * 0.01, wz * 0.01, 3);
-      const h = this.seaLevel - 8 + depth * 6;
+      const h = this.seaLevel - 3 + depth * 3;
       return this._clamp(Math.floor(h));
     }
+
     let height = this.seaLevel;
-    const base = this.continentNoise.fbm(wx * 0.008, wz * 0.008, 5);
-    height += base * 12;
-    const detail = this.detailNoise.fbm(wx * 0.03, wz * 0.03, 4);
-    height += detail * 6;
+
+    // Broader, smoother base — less extreme variation
+    const base = this.continentNoise.fbm(wx * 0.005, wz * 0.005, 4);
+    height += base * 8;
+
+    // Medium detail — gentler
+    const detail = this.detailNoise.fbm(wx * 0.025, wz * 0.025, 3);
+    height += detail * 4;
+
+    // Very fine detail — subtle
     const micro = this.detailNoise.noise2D(wx * 0.1, wz * 0.1);
-    height += micro * 2;
+    height += micro * 1;
+
     if (biome === BIOME.MOUNTAINS) {
       const mountain = this.mountainNoise.fbm(wx * 0.012, wz * 0.012, 5);
       const ridge = 1.0 - Math.abs(mountain);
-      const ridgeSignal = ridge * ridge * 40;
+      const ridgeSignal = ridge * ridge * 25;
       const peakNoise = this.mountainNoise.fbm(wx * 0.006, wz * 0.006, 3);
       const peakFactor = 0.5 + peakNoise * 0.5;
       height += ridgeSignal * peakFactor;
+      // More gradual sharp peaks — reduced multiplier
       if (mountain > 0.3 && peakNoise > 0.15) {
-        height += (mountain - 0.3) * 25;
+        height += (mountain - 0.3) * 12;
       }
     }
+
     switch (biome) {
       case BIOME.PLAINS:
         height += 2;
         height *= 0.85;
         break;
       case BIOME.FOREST:
-        height += 3;
+        height += 2;
         height *= 0.9;
         break;
       case BIOME.DESERT: {
-        height *= 0.75;
-        height += 4;
-        const dune = this.detailNoise.noise2D(wx * 0.05, wz * 0.05);
-        height += dune * 3;
+        height *= 0.8;
+        height += 3;
+        const dune = this.detailNoise.noise2D(wx * 0.04, wz * 0.04);
+        height += dune * 2;
         break;
       }
       case BIOME.SNOW:
-        height += 5;
+        height += 3;
         break;
       case BIOME.JUNGLE: {
         height *= 0.88;
-        height += 3;
-        const jungleVar = this.detailNoise.noise2D(wx * 0.06, wz * 0.06);
-        height += jungleVar * 4;
+        height += 2;
+        const jungleVar = this.detailNoise.noise2D(wx * 0.05, wz * 0.05);
+        height += jungleVar * 3;
         break;
       }
     }
+
     return this._clamp(Math.floor(height));
   }
 
@@ -242,15 +242,19 @@ export class TerrainGenerator {
       const bedrockChance = this.caveNoise.noise2D(wx * 0.5 + wy * 100, wz * 0.5);
       if (bedrockChance > -0.3 || wy === 1) return BlockID.BEDROCK;
     }
-    if (wy >= 5 && wy <= 50) {
-      const cave = this.caveNoise.fbm3(wx * 0.04, wy * 0.05, wz * 0.04, 3);
-      const caveThreshold = 0.38 - (wy <= 15 ? 0.05 : 0);
+
+    // Smaller, deeper caves only — no giant holes near surface
+    if (wy >= 5 && wy <= 30) {
+      const cave = this.caveNoise.fbm3(wx * 0.05, wy * 0.06, wz * 0.05, 3);
+      // Higher threshold = fewer caves; depth scaling makes them rarer near surface
+      const depthFactor = 1 - (wy / 30) * 0.3;
+      const caveThreshold = 0.45 - (wy <= 15 ? 0.03 : 0) * depthFactor;
       if (cave > caveThreshold) return BlockID.AIR;
     }
-    if (wy >= 10 && wy <= 30) {
-      const bigCave = this.caveNoise.fbm3(wx * 0.02, wy * 0.03, wz * 0.02, 2);
-      if (bigCave > 0.48) return BlockID.AIR;
-    }
+
+    // No big caves at all (removed the large cave generator that made giant holes)
+
+    // Rock on steep slopes
     if (wy > gh && wy <= gh + 3) {
       const hN = this.getHeight(wx, wz - 2);
       const hS = this.getHeight(wx, wz + 2);
@@ -259,10 +263,12 @@ export class TerrainGenerator {
       const maxDiff = Math.max(Math.abs(gh - hN), Math.abs(gh - hS), Math.abs(gh - hE), Math.abs(gh - hW));
       if (maxDiff > 6 && wy > gh + 1) return BlockID.STONE;
     }
+
     if (wy < gh - 4) return BlockID.STONE;
     if (wy < gh) return BlockID.DIRT;
     if (wy === gh) {
-      if (gh >= this.seaLevel - 2 && gh <= this.seaLevel + 2) return BlockID.SAND;
+      // Wider beach zone: seaLevel-3 to seaLevel+3
+      if (gh >= this.seaLevel - 3 && gh <= this.seaLevel + 3) return BlockID.SAND;
       switch (biome) {
         case BIOME.DESERT: return BlockID.SAND;
         case BIOME.SNOW:   return BlockID.SNOW;
@@ -272,31 +278,60 @@ export class TerrainGenerator {
         default: return BlockID.GRASS;
       }
     }
+
     if (wy <= this.seaLevel && wy > gh) return BlockID.WATER;
+
     return BlockID.AIR;
   }
 
   generateChunk(chunk) {
     const bx = chunk.chunkX * 16, bz = chunk.chunkZ * 16;
+    const heightCache = new Int32Array(16 * 16);
+
     for (let lx = 0; lx < 16; lx++) for (let lz = 0; lz < 16; lz++) {
       const wx = bx + lx, wz = bz + lz;
       const h = this.getHeight(wx, wz);
       const b = this.getBiome(wx, wz);
+      heightCache[lx * 16 + lz] = h;
       for (let y = 0; y < 256; y++) {
         const bl = this.getBlockAt(wx, y, wz, h, b);
         if (bl !== BlockID.AIR) chunk.setBlock(lx, y, lz, bl);
       }
     }
-    // FIX-S: Tree placement — trees are confined to their own chunk.
-    // Tree place() methods clamp to chunk boundaries (0..15).
-    // Canopies near chunk edges will be clipped.
+
+    // Anti-float pass: fill overhangs under terrain to prevent floating blocks
+    for (let lx = 0; lx < 16; lx++) for (let lz = 0; lz < 16; lz++) {
+      const gh = heightCache[lx * 16 + lz];
+      let lastSolid = 0;
+      for (let y = 0; y <= gh; y++) {
+        const bl = chunk.getBlock(lx, y, lz);
+        if (bl !== BlockID.AIR && bl !== BlockID.WATER) {
+          lastSolid = y;
+        } else if (bl === BlockID.AIR && y > 5 && y < gh) {
+          // Check if there's a significant gap of air below solid ground above
+          const aboveBlock = chunk.getBlock(lx, y + 1, lz);
+          if (aboveBlock !== BlockID.AIR && aboveBlock !== BlockID.WATER) {
+            // There's solid above and air here — check if there's solid well below
+            const distBelow = y - lastSolid;
+            if (distBelow > 3) {
+              // Fill air gap with stone to prevent floating platforms
+              chunk.setBlock(lx, y, lz, BlockID.STONE);
+            }
+          }
+        }
+      }
+    }
+
+    // Trees
     for (let lx = 0; lx < 16; lx++) for (let lz = 0; lz < 16; lz++) {
       const wx = bx + lx, wz = bz + lz;
-      const h = this.getHeight(wx, wz);
+      const h = heightCache[lx * 16 + lz];
       const b = this.getBiome(wx, wz);
+
       if (h <= this.seaLevel + 1) continue;
       if (b === BIOME.OCEAN) continue;
       if (b === BIOME.MOUNTAINS && h > 72) continue;
+
       let types = [];
       let density = 0;
       switch (b) {
@@ -327,20 +362,30 @@ export class TerrainGenerator {
         default:
           continue;
       }
+
       const posRng = mulberry32(wx * 374761393 + wz * 668265263 + this.seed);
       const treeRoll = posRng();
+
       if (treeRoll < density) {
         const groundBlock = chunk.getBlock(lx, h, lz);
         if (groundBlock === BlockID.GRASS || groundBlock === BlockID.SAND || groundBlock === BlockID.SNOW) {
           const typeIdx = Math.floor(posRng() * types.length);
           const T = types[typeIdx];
           if (h >= T.minGround) {
-            // FIX-S: Removed unused cross-chunk params
-            T.place(chunk, lx, h + 1, lz, posRng);
+            T.place(chunk, lx, h + 1, lz, posRng, this._getBlockFromWorld.bind(this), bx, bz);
           }
         }
       }
     }
+  }
+
+  _getBlockFromWorld(localChunk, bx, bz, wx, wy, wz) {
+    const lx = wx - bx;
+    const lz = wz - bz;
+    if (lx >= 0 && lx < 16 && lz >= 0 && lz < 16) {
+      return localChunk.getBlock(lx, wy, lz);
+    }
+    return BlockID.AIR;
   }
 
   _clamp(h) {
