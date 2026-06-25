@@ -1,10 +1,10 @@
 /**
- * renderer.js: Three.js + skybox shader + day/night shaders + fog alinhado
+ * renderer.js: Three.js + skybox shader + day/night + fog alinhado
  * FIX-R: Sky gradient now uses camera-relative coordinates
  * FIX-V5: MSAA antialiasing disabled
- * + Enhanced sky shader: stars at night, sunset/sunrise glow halo
- * + Water overlay: screen-space animated wave shader (replaces CSS overlay)
- * + Day/night post-process: color grading tint pass
+ * + Enhanced sky shader: stars at night, sun glow, moon glow, sunset horizon tint
+ * + Water overlay: screen-space animated wave shader (additive blend, no render target)
+ * + Day/night: driven by sky shader + light color/intensity shifts (no post-process pass)
  */
 
 import * as THREE from 'three';
@@ -27,23 +27,19 @@ void main(){
   vec3 dir=normalize(rel+vec3(0.,off,0.));
   float h=dir.y;
 
-  // base sky gradient
   vec3 sky=mix(botColor,topColor,max(pow(max(h,0.),exp),0.));
 
-  // sun glow halo
   float sunDot=max(dot(dir,normalize(sunDir)),0.);
   float sunGlow=pow(sunDot,8.0)*0.6;
   float sunDisk=pow(sunDot,256.0)*1.2;
   sky+=sunColor*(sunGlow+sunDisk)*dayMix;
 
-  // moon glow
   vec3 moonDir=normalize(-sunDir);
   float moonDot=max(dot(dir,moonDir),0.);
   float moonGlow=pow(moonDot,12.0)*0.15;
   float moonDisk=pow(moonDot,512.0)*0.8;
   sky+=moonColor*(moonGlow+moonDisk)*(1.0-dayMix);
 
-  // stars — only visible at night
   if(h>0.05){
     vec2 starUv=dir.xz/(dir.y+0.001)*80.0;
     float star=step(0.998,hash(floor(starUv)));
@@ -52,7 +48,6 @@ void main(){
     sky+=vec3(starBright)*0.8;
   }
 
-  // sunset/sunrise tint when sun is near horizon
   float horizonGlow=exp(-abs(h)*6.0)*(1.0-dayMix*0.5);
   vec3 sunsetColor=mix(vec3(1.0,0.3,0.05),vec3(1.0,0.6,0.2),dayMix);
   float sunsetMask=smoothstep(0.0,0.35,dayMix)*smoothstep(1.0,0.5,dayMix);
@@ -87,43 +82,7 @@ void main(){
   float edgeDark=1.0-length(vUv-0.5)*0.6;
   col*=edgeDark;
 
-  gl_FragColor=vec4(col,intensity*0.45);
-}`;
-
-const DAYNIGHT_VS = `varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position,1.0);}`;
-
-const DAYNIGHT_FS = `
-uniform sampler2D tDiffuse;
-uniform float dayMix;
-uniform float isUnderwater;
-varying vec2 vUv;
-
-void main(){
-  vec4 c=texture2D(tDiffuse,vUv);
-
-  // night blue tint
-  vec3 nightTint=vec3(0.08,0.08,0.22);
-  vec3 dayTint=vec3(1.0);
-  vec3 tint=mix(nightTint,dayTint,dayMix);
-  c.rgb*=tint;
-
-  // contrast boost at night
-  float nt=1.0-dayMix;
-  c.rgb=mix(c.rgb,c.rgb*0.7+0.3*vec3(dot(c.rgb,vec3(0.299,0.587,0.114))),nt*0.3);
-
-  // underwater green-blue shift
-  if(isUnderwater>0.5){
-    c.rgb=mix(c.rgb,c.rgb*vec3(0.4,0.7,0.9),0.5);
-    float fogDist=length(vUv-0.5)*1.4;
-    c.rgb=mix(c.rgb,vec3(0.0,0.15,0.35),fogDist*0.6);
-  }
-
-  // vignette — stronger at night
-  float vig=1.0-length(vUv-0.5)*1.4;
-  vig=mix(vig,vig*0.7,nt*0.5);
-  c.rgb*=clamp(vig,0.0,1.0);
-
-  gl_FragColor=c;
+  gl_FragColor=vec4(col,intensity*0.4);
 }`;
 
 export class Renderer {
@@ -133,7 +92,6 @@ export class Renderer {
     this.threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.threeRenderer.setSize(window.innerWidth, window.innerHeight);
     this.threeRenderer.setClearColor(0x87CEEB);
-    this.threeRenderer.autoClear = false;
     container.appendChild(this.threeRenderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, FOG_E*1.5);
@@ -147,6 +105,7 @@ export class Renderer {
     this.dayTime = 0;
     this.daySpeed = 0.008;
     this.isUnderwater = false;
+    this._lastCycleQ = 0.5;
 
     this._fogDay = new THREE.Color(0x87CEEB);
     this._fogNight = new THREE.Color(0x0a0a1a);
@@ -159,14 +118,13 @@ export class Renderer {
     this._initSky();
     this._initSunMoon();
     this._initClouds();
-    this._initPostProcess();
+    this._initWaterOverlay();
 
-    this._onResize = () => { this._r(); this._resizePost(); };
+    this._onResize = () => this._r();
     window.addEventListener('resize', this._onResize);
   }
 
   _initSky() {
-    const sg = new THREE.SphereGeometry(FOG_E*1.4, 16, 8);
     this._skyUniforms = {
       topColor: { value: new THREE.Color(0x1a8aff) },
       botColor: { value: new THREE.Color(0x87CEEB) },
@@ -180,6 +138,7 @@ export class Renderer {
       dayMix: { value: 1.0 },
       time: { value: 0 },
     };
+    const sg = new THREE.SphereGeometry(FOG_E*1.4, 16, 8);
     const sm = new THREE.ShaderMaterial({
       uniforms: this._skyUniforms,
       vertexShader: SKY_VS,
@@ -192,9 +151,6 @@ export class Renderer {
   }
 
   _initSunMoon() {
-    this._sunObj = null;
-    this._moonObj = null;
-
     const sunGeo = new THREE.SphereGeometry(8, 8, 8);
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xffee44 });
     this._sunObj = new THREE.Mesh(sunGeo, sunMat);
@@ -214,13 +170,9 @@ export class Renderer {
       color: 0xffffff, transparent: true, opacity: 0.7,
       side: THREE.DoubleSide, depthWrite: false,
     });
-
     const rng = this._cloudRng(42);
     for (let i = 0; i < 35; i++) {
-      const cloudGeo = new THREE.PlaneGeometry(
-        12 + rng() * 20,
-        12 + rng() * 20
-      );
+      const cloudGeo = new THREE.PlaneGeometry(12 + rng() * 20, 12 + rng() * 20);
       const cloud = new THREE.Mesh(cloudGeo, cloudMat);
       cloud.position.set(
         (rng() - 0.5) * FOG_E * 2,
@@ -234,24 +186,7 @@ export class Renderer {
     this.scene.add(this._cloudGroup);
   }
 
-  _initPostProcess() {
-    const w = window.innerWidth, h = window.innerHeight;
-
-    this._rtScene = new THREE.Scene();
-    this._rtCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-
-    this._renderTarget = new THREE.WebGLRenderTarget(w, h, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      format: THREE.RGBAFormat,
-    });
-
-    this._renderTarget2 = new THREE.WebGLRenderTarget(w, h, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      format: THREE.RGBAFormat,
-    });
-
+  _initWaterOverlay() {
     this._waterUniforms = {
       time: { value: 0 },
       intensity: { value: 0 },
@@ -264,35 +199,14 @@ export class Renderer {
     });
     this._waterQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), waterMat);
     this._waterQuad.frustumCulled = false;
-    this._waterScene = new THREE.Scene();
-    this._waterScene.add(this._waterQuad);
-
-    this._dayNightUniforms = {
-      tDiffuse: { value: this._renderTarget.texture },
-      dayMix: { value: 1.0 },
-      isUnderwater: { value: 0.0 },
-    };
-    const dayNightMat = new THREE.ShaderMaterial({
-      uniforms: this._dayNightUniforms,
-      vertexShader: DAYNIGHT_VS,
-      fragmentShader: DAYNIGHT_FS,
-      depthTest: false, depthWrite: false,
-    });
-    this._dayNightQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), dayNightMat);
-    this._dayNightQuad.frustumCulled = false;
-    this._dnScene = new THREE.Scene();
-    this._dnScene.add(this._dayNightQuad);
-  }
-
-  _resizePost() {
-    const w = window.innerWidth, h = window.innerHeight;
-    if (this._renderTarget) this._renderTarget.setSize(w, h);
-    if (this._renderTarget2) this._renderTarget2.setSize(w, h);
+    this._waterRTScene = new THREE.Scene();
+    this._waterRTScene.add(this._waterQuad);
+    this._waterRTCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   }
 
   _cloudRng(seed) {
     let s = seed | 0;
-    return function() {
+    return function () {
       s |= 0; s = s + 0x6D2B79F5 | 0;
       let t = Math.imul(s ^ s >>> 15, 1 | s);
       t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
@@ -300,28 +214,22 @@ export class Renderer {
     };
   }
 
-  _r(){
-    this.camera.aspect=window.innerWidth/window.innerHeight;
+  _r() {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
-    this.threeRenderer.setSize(window.innerWidth,window.innerHeight);
+    this.threeRenderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  render(){
-    this.threeRenderer.clear();
-    this.threeRenderer.render(this.scene, this.camera, this._renderTarget, true);
-
-    this._dayNightUniforms.tDiffuse.value = this._renderTarget.texture;
-    this._dayNightUniforms.dayMix.value = this._lastCycleQ ?? 0.5;
-    this._dayNightUniforms.isUnderwater.value = this.isUnderwater ? 1.0 : 0.0;
-    this.threeRenderer.render(this._dnScene, this._rtCamera);
+  render() {
+    this.threeRenderer.render(this.scene, this.camera);
 
     if (this.isUnderwater) {
       this._waterUniforms.intensity.value = 1.0;
-      this.threeRenderer.render(this._waterScene, this._rtCamera);
+      this.threeRenderer.render(this._waterRTScene, this._waterRTCamera);
     }
   }
 
-  updateSky(p){
+  updateSky(p) {
     this.sky.position.copy(p);
     this._skyUniforms.camPos.value.copy(p);
     this._skyUniforms.time.value = this.dayTime;
@@ -333,10 +241,12 @@ export class Renderer {
 
     if (cycleQ !== this._lastDayCycle) {
       this._lastDayCycle = cycleQ;
+
       const sunI = 0.6 + cycleQ * 0.6;
       const ambI = 0.2 + cycleQ * 0.35;
       this.sun.intensity = sunI;
       this.amb.intensity = ambI;
+
       this.scene.fog.color.lerpColors(this._fogNight, this._fogDay, cycleQ);
       this.threeRenderer.setClearColor(this.scene.fog.color);
 
@@ -344,14 +254,12 @@ export class Renderer {
       this._skyUniforms.botColor.value.lerpColors(this._botNight, this._botDay, cycleQ);
       this._skyUniforms.dayMix.value = cycleQ;
 
-      // sun color shift
       if (cycleQ > 0.3) {
         this._skyUniforms.sunColor.value.setHex(0xffee88);
       } else if (cycleQ > 0.15) {
         this._skyUniforms.sunColor.value.set(1.0, 0.5 + cycleQ, 0.2 + cycleQ * 0.5);
       }
 
-      // directional light color shifts with time of day
       if (cycleQ < 0.3) {
         this.sun.color.lerpColors(new THREE.Color(0x3344aa), new THREE.Color(0xffaa44), cycleQ / 0.3);
       } else {
@@ -375,11 +283,7 @@ export class Renderer {
     this._skyUniforms.sunDir.value.set(sunDirX, sunDirY, sunDirZ).normalize();
 
     if (this._sunObj) {
-      this._sunObj.position.set(
-        p.x + sunDirX * sunDist,
-        p.y + sunDirY * sunDist,
-        p.z
-      );
+      this._sunObj.position.set(p.x + sunDirX * sunDist, p.y + sunDirY * sunDist, p.z);
     }
     if (this._moonObj) {
       this._moonObj.position.set(
@@ -392,8 +296,7 @@ export class Renderer {
     this._cloudTime = (this._cloudTime || 0) + 0.02;
     if (this._cloudGroup) {
       this._cloudGroup.position.set(
-        p.x + Math.sin(this._cloudTime * 0.1) * 10,
-        0,
+        p.x + Math.sin(this._cloudTime * 0.1) * 10, 0,
         p.z + Math.cos(this._cloudTime * 0.08) * 8
       );
       const cloudAlpha = 0.3 + cycleQ * 0.45;
@@ -405,18 +308,20 @@ export class Renderer {
     this._waterUniforms.time.value = this.dayTime;
   }
 
-  dispose(){
-    window.removeEventListener('resize',this._onResize);
-    if (this._sunObj) { this.scene.remove(this._sunObj); this._sunObj.geometry.dispose(); this._sunObj.material.dispose(); this._sunObj = null; }
-    if (this._moonObj) { this.scene.remove(this._moonObj); this._moonObj.geometry.dispose(); this._moonObj.material.dispose(); this._moonObj = null; }
-    if (this._cloudGroup) {
-      this._cloudGroup.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
-      this.scene.remove(this._cloudGroup);
-      this._cloudGroup = null;
-    }
-    if (this._renderTarget) { this._renderTarget.dispose(); this._renderTarget = null; }
-    if (this._renderTarget2) { this._renderTarget2.dispose(); this._renderTarget2 = null; }
-    if (this._waterQuad) { this._waterQuad.geometry.dispose(); this._waterQuad.material.dispose(); }
-    if (this._dayNightQuad) { this._dayNightQuad.geometry.dispose(); this._dayNightQuad.material.dispose(); }
+  dispose() {
+    this._lastDayCycle = -1;
+    this._lastCycleQ = 0.5;
+    this.dayTime = 0;
+    this.isUnderwater = false;
+
+    if (this._sunObj) { this._sunObj.visible = true; this._sunObj.material.color.setHex(0xffee44); }
+    if (this._moonObj) { this._moonObj.visible = true; this._moonObj.material.color.setHex(0xccccee); }
+    if (this._cloudGroup) { if (this._cloudGroup.parent !== this.scene) this.scene.add(this._cloudGroup); }
+
+    this.sun.intensity = 1.2;
+    this.sun.color.set(0xffffff);
+    this.amb.intensity = 0.5;
+    this.scene.fog.color.set(0x87CEEB);
+    this.threeRenderer.setClearColor(0x87CEEB);
   }
 }
