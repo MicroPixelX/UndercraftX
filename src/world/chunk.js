@@ -7,16 +7,13 @@
  *  - #2: Tree cross-chunk clipping — trimmed leaf placement to chunk bounds
  *  - FIX-D: Use Uint32 index buffer to prevent index overflow on dense chunks
  *  - FIX-K: safeMax loop instead of Math.max(...spread) for index arrays
- *  - FIX-U: Textures from BlockRegistry.materials are now actually used.
- *           Previously chunk.js only used flat vertex colors with a single
- *           shared MeshLambertMaterial — the entire texture pipeline
- *           (generateTexture → initBlockTextures → createBlockMaterial →
- *           BlockRegistry.materials) was disconnected. Now each block face
- *           uses its correct per-face material with the CanvasTexture map.
+ *  - FIX-U: Textures from BlockRegistry.materials are now actually used
+ *  - FIX-V4: Water face culling now skips faces adjacent to transparent
+ *           solid blocks (leaves, sakura, cactus) — prevents Z-fighting
  */
 
 import * as THREE from 'three';
-import { BlockID, BlockRegistry, isBlockTransparent } from '../blocks/Block.js';
+import { BlockID, BlockRegistry, isBlockTransparent, isBlockSolid } from '../blocks/Block.js';
 
 const SX = 16, SY = 256, SZ = 16;
 
@@ -111,6 +108,9 @@ export class Chunk {
         if (isWater) {
           if (nb === BlockID.WATER) continue;
           if (nb !== BlockID.AIR && !isBlockTransparent(nb)) continue;
+          // FIX-V4: Also skip water faces adjacent to transparent solid blocks
+          // (leaves, sakura_leaves, cactus) — prevents Z-fighting inside those blocks
+          if (nb !== BlockID.AIR && isBlockTransparent(nb) && isBlockSolid(nb)) continue;
         } else {
           if (nb !== BlockID.AIR && !isBlockTransparent(nb)) continue;
           if (data.transparent && nb === block) continue;
