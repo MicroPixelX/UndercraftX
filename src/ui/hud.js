@@ -20,7 +20,7 @@ export class HUD {
   }
 
   _ensureElements() {
-    const tags = ['fps', 'pos', 'chunk', 'biome', 'seed'];
+    const tags = ['fps', 'pos', 'chunk', 'biome', 'seed', 'break'];
     for (const tag of tags) {
       const div = document.createElement('div');
       div.dataset.role = tag;
@@ -31,7 +31,7 @@ export class HUD {
 
   setSeed(s) { this.seed = s; }
 
-  update(pos, chunk, biome = '') {
+  update(pos, chunk, biome = '', breakInfo = null) {
     // FPS counter — always runs
     this.fc++;
     const n = performance.now();
@@ -47,6 +47,12 @@ export class HUD {
     this._divs.chunk.textContent = `Chunk: ${chunk.x},${chunk.z}`;
     this._divs.biome.textContent = biome ? `Bioma: ${biome}` : '';
     this._divs.seed.textContent = `Seed: ${this.seed}`;
+    if (breakInfo && breakInfo.progress > 0 && breakInfo.time > 0) {
+      const pct = Math.min(100, Math.floor((breakInfo.progress / breakInfo.time) * 100));
+      this._divs.break.textContent = `Quebrando: ${pct}%`;
+    } else {
+      this._divs.break.textContent = '';
+    }
   }
 
   hide() { this.el.style.display = 'none'; }
