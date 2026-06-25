@@ -4,7 +4,9 @@
  *
  * FIXES:
  *  - #4: Material is now cached and reused — no more leak on every rebuildMesh
- *  - #2: Tree cross-chunk clipping — trimmed leaf placement to chunk bounds, deferred to terrain.js
+ *  - #2: Tree cross-chunk clipping — trimmed leaf placement to chunk bounds
+ *  - FIX-D: Use Uint32 index buffer to prevent index overflow on dense chunks
+ *           (vertices can exceed 65535 in chunks with caves, forests, or mountains)
  */
 
 import * as THREE from 'three';
@@ -143,10 +145,14 @@ export class Chunk {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(d.solid.pos, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(d.solid.col, 3));
-      g.setIndex(d.solid.idx);
+      // FIX-D: Always use Uint32 indices to prevent overflow on dense chunks.
+      // Dense chunks (caves, forests, mountains) can exceed 65535 vertices,
+      // which silently corrupts the mesh with Uint16 indices.
+      const maxIdx = Math.max(...d.solid.idx, 0);
+      const IndexArrayType = maxIdx > 65535 ? Uint32Array : Uint16Array;
+      g.setIndex(new THREE.BufferAttribute(new IndexArrayType(d.solid.idx), 1));
       g.computeVertexNormals();
 
-      // FIX #4: Reuse shared material instead of creating new one per chunk
       const mesh = new THREE.Mesh(g, getSolidMaterial());
       scene.add(mesh);
       this.mesh = mesh;
@@ -156,10 +162,12 @@ export class Chunk {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(d.water.pos, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(d.water.col, 3));
-      g.setIndex(d.water.idx);
+      // FIX-D: Same Uint32 fix for water mesh
+      const maxWIdx = Math.max(...d.water.idx, 0);
+      const WIndexArrayType = maxWIdx > 65535 ? Uint32Array : Uint16Array;
+      g.setIndex(new THREE.BufferAttribute(new WIndexArrayType(d.water.idx), 1));
       g.computeVertexNormals();
 
-      // FIX #4: Reuse shared water material
       this.waterMesh = new THREE.Mesh(g, getWaterMaterial());
       this.waterMesh.renderOrder = 1;
       scene.add(this.waterMesh);

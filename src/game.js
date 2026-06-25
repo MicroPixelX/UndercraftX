@@ -3,12 +3,11 @@
  *
  * FIXES:
  *  - #6: Only rebuild dirty chunks instead of ALL chunks on every update
- *  - Detach chunks from scene only when actually removed (not every frame)
  *  - #11: getSpawnPosition now uses the seeded PRNG instead of Math.random()
- *         so the spawn point is deterministic for the same seed.
  *  - #12: updateChunks double-rebuild fix — new chunks are built in a single pass.
- *         Previously, the second pass could re-mark already-built chunks as dirty
- *         and rebuild them again in the same frame (wasted CPU + potential flicker).
+ *  - FIX-G: getSpawnPosition now checks that the spawn area is clear of solid blocks
+ *           (trees, etc.) before placing the player. Tries up to 20 positions,
+ *           and for each position, verifies the player AABB is free.
  */
 
 import * as THREE from 'three';
@@ -33,7 +32,6 @@ export class Game {
   constructor(scene, camera, dom, seed = 42) {
     this.scene = scene; this.camera = camera; this.domElement = dom;
     this.seed = seed;
-    // FIX #11: Seeded spawn RNG — deterministic per world seed
     this._spawnRng = mulberry32(seed ^ 0xDEADBEEF);
     initBlockTextures();
     this.chunks = new Map();
@@ -64,10 +62,8 @@ export class Game {
     this.cx=pcx;this.cz=pcz;
 
     const loaded=new Set();
-    // FIX #12: Track which chunks are newly created this update cycle
     const newlyCreated = new Set();
 
-    // Generate new chunks that entered radius
     for(let dx=-RD;dx<=RD;dx++)for(let dz=-RD;dz<=RD;dz++){
       const cx=this.cx+dx,cz=this.cz+dz,k=this.key(cx,cz);
       loaded.add(k);
@@ -79,7 +75,6 @@ export class Game {
       }
     }
 
-    // Remove chunks that left radius
     for(const [k,ch] of this.chunks){
       if(!loaded.has(k)){
         ch.dispose(this.scene);
@@ -87,9 +82,6 @@ export class Game {
       }
     }
 
-    // FIX #6 + FIX #12: Single-pass rebuild strategy.
-    // 1. Mark existing clean chunks dirty if they border a newly-created chunk.
-    // 2. Build ALL dirty chunks exactly once — no second pass needed.
     for(const [,ch] of this.chunks){
       if(!ch.dirty){
         const ncx = ch.chunkX, ncz = ch.chunkZ;
@@ -98,8 +90,6 @@ export class Game {
           this.key(ncx,ncz-1), this.key(ncx,ncz+1)
         ];
         for(const nk of neighborKeys){
-          // FIX #12: Only mark dirty when the neighbor was JUST created, not when
-          // it was already present and clean — avoids cascading dirty propagation.
           if(newlyCreated.has(nk)){
             ch.dirty = true;
             break;
@@ -108,7 +98,6 @@ export class Game {
       }
     }
 
-    // Single rebuild pass — every dirty chunk is built exactly once per update
     for(const [,ch] of this.chunks){
       if(ch.dirty){
         ch.buildMesh(this.scene,(gx,gy,gz)=>this.getNeighborBlock(gx,gy,gz));
@@ -126,21 +115,37 @@ export class Game {
 
   isSolidAt(wx,wy,wz){return isBlockSolid(this.getBlockAt(Math.floor(wx),Math.floor(wy),Math.floor(wz)));}
 
+  // FIX-G: Check if a position is clear for the player (no solid blocks in their AABB)
+  _isSpawnClear(sx, sy, sz) {
+    const hw = 0.3; // player half-width
+    const mh = 1.8; // player height
+    // Check all block positions the player AABB would overlap
+    for (let x = Math.floor(sx - hw); x <= Math.floor(sx + hw); x++)
+      for (let y = Math.floor(sy); y <= Math.floor(sy + mh); y++)
+        for (let z = Math.floor(sz - hw); z <= Math.floor(sz + hw); z++) {
+          if (isBlockSolid(this.getBlockAt(x, y, z))) return false;
+        }
+    return true;
+  }
+
   getSpawnPosition(){
-    // FIX #11: Use seeded PRNG instead of Math.random() so spawn is deterministic
     const rng = this._spawnRng;
-    for(let attempt=0;attempt<20;attempt++){
+    for(let attempt=0;attempt<40;attempt++){
       const sx=8+Math.floor(rng()*64)-32;
       const sz=8+Math.floor(rng()*64)-32;
       const h=this.terrain.getHeight(sx,sz);
       const biome=this.terrain.getBiome(sx,sz);
       if(biome!==BIOME.OCEAN&&h>this.terrain.seaLevel+1){
-        return new THREE.Vector3(sx,h+3,sz);
+        const sy = h + 1; // spawn just above ground
+        // FIX-G: Verify the spawn area is clear of solid blocks (trees etc.)
+        if (this._isSpawnClear(sx, sy, sz)) {
+          return new THREE.Vector3(sx, sy, sz);
+        }
       }
     }
+    // Fallback — use default position and hope for the best
     const sx=8,sz=8,h=this.terrain.getHeight(sx,sz);
-    let sy=h+3;
-    if(h<=this.terrain.seaLevel)sy=this.terrain.seaLevel+3;
+    let sy=Math.max(h+1,this.terrain.seaLevel+2);
     return new THREE.Vector3(sx,sy,sz);
   }
 
