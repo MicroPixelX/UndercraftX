@@ -35,10 +35,36 @@ export class Player {
     this._dir = new THREE.Vector3();
     this._fwd = new THREE.Vector3();
     this._rt = new THREE.Vector3();
+    this._rcOrigin = new THREE.Vector3();
+    this._rcDir = new THREE.Vector3();
+    this.breakProgress = 0;
+    this.breakTarget = null;
+    this.BREAK_TIMES = {};
+    this.BREAK_TIMES[BlockID.STONE] = 2.0;
+    this.BREAK_TIMES[BlockID.COAL_ORE] = 2.5;
+    this.BREAK_TIMES[BlockID.IRON_ORE] = 3.0;
+    this.BREAK_TIMES[BlockID.DIRT] = 0.5;
+    this.BREAK_TIMES[BlockID.GRASS] = 0.6;
+    this.BREAK_TIMES[BlockID.SAND] = 0.5;
+    this.BREAK_TIMES[BlockID.WOOD] = 1.5;
+    this.BREAK_TIMES[BlockID.OAK_LOG] = 1.5;
+    this.BREAK_TIMES[BlockID.PINE_LOG] = 1.5;
+    this.BREAK_TIMES[BlockID.BIRCH_LOG] = 1.5;
+    this.BREAK_TIMES[BlockID.LEAVES] = 0.3;
+    this.BREAK_TIMES[BlockID.SAKURA_LEAVES] = 0.3;
+    this.BREAK_TIMES[BlockID.SNOW] = 0.4;
+    this.BREAK_TIMES[BlockID.CACTUS] = 0.8;
+    this.BREAK_TIMES[BlockID.ROSE] = 0.1;
+    this.BREAK_TIMES[BlockID.DANDELION] = 0.1;
+    this.BREAK_TIMES[BlockID.TALL_GRASS] = 0.05;
+    this.mouseDown = false;
+    this.mouseButton = 0;
     // FIX-V1: Store bound references so we can remove them in dispose()
     this._kd = this._onKeyDown.bind(this);
     this._ku = this._onKeyUp.bind(this);
     this._mm = this._onMouseMove.bind(this);
+    this._md = this._onMouseDown.bind(this);
+    this._mu = this._onMouseUp.bind(this);
     this._setup();
   }
 
@@ -46,6 +72,8 @@ export class Player {
     document.addEventListener('keydown', this._kd);
     document.addEventListener('keyup', this._ku);
     document.addEventListener('mousemove', this._mm);
+    document.addEventListener('mousedown', this._md);
+    document.addEventListener('mouseup', this._mu);
   }
 
   // FIX-V1: Remove all event listeners — call before creating a new Player
@@ -53,6 +81,8 @@ export class Player {
     document.removeEventListener('keydown', this._kd);
     document.removeEventListener('keyup', this._ku);
     document.removeEventListener('mousemove', this._mm);
+    document.removeEventListener('mousedown', this._md);
+    document.removeEventListener('mouseup', this._mu);
     this.isLocked = false;
   }
 
@@ -85,6 +115,18 @@ export class Player {
     this.yaw -= e.movementX * s;
     this.pitch -= e.movementY * s;
     this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
+  }
+
+  _onMouseDown(e) {
+    if (!this.isLocked) return;
+    this.mouseDown = true;
+    this.mouseButton = e.button;
+  }
+
+  _onMouseUp(e) {
+    this.mouseDown = false;
+    this.breakProgress = 0;
+    this.breakTarget = null;
   }
 
   update(delta, getBlockAt) {
@@ -198,6 +240,58 @@ export class Player {
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
+  }
+
+  getLookDirection() {
+    const d = new THREE.Vector3();
+    d.x = -Math.sin(this.yaw) * Math.cos(this.pitch);
+    d.y = Math.sin(this.pitch);
+    d.z = -Math.cos(this.yaw) * Math.cos(this.pitch);
+    d.normalize();
+    return d;
+  }
+
+  getRayOrigin() {
+    this._rcOrigin.set(this.position.x, this.position.y + this.eyeHeight, this.position.z);
+    return this._rcOrigin;
+  }
+
+  updateBreaking(dt, game) {
+    if (!this.mouseDown || !this.isLocked) {
+      this.breakProgress = 0;
+      this.breakTarget = null;
+      return null;
+    }
+
+    if (this.mouseButton === 2) return { action: 'place', game };
+
+    const origin = this.getRayOrigin();
+    const direction = this.getLookDirection();
+    const hit = game.raycastBlock(origin, direction);
+
+    if (!hit) {
+      this.breakProgress = 0;
+      this.breakTarget = null;
+      return null;
+    }
+
+    const targetKey = `${hit.x},${hit.y},${hit.z}`;
+
+    if (this.breakTarget !== targetKey) {
+      this.breakTarget = targetKey;
+      this.breakProgress = 0;
+    }
+
+    const breakTime = this.BREAK_TIMES[hit.block] ?? 1.5;
+    this.breakProgress += dt;
+
+    if (this.breakProgress >= breakTime) {
+      this.breakProgress = 0;
+      this.breakTarget = null;
+      return { action: 'break', x: hit.x, y: hit.y, z: hit.z, face: hit.face, game };
+    }
+
+    return null;
   }
 
   _findCollisionAxis(pos, hw, h, gb, axis) {
