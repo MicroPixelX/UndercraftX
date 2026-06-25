@@ -28,8 +28,10 @@ export class Player {
     this.pitch = 0; this.yaw = 0;
     this.moveForward = this.moveBackward = this.moveLeft = this.moveRight = false;
     this.wantJump = false; this.isLocked = false; this.onGround = false; this.isInWater = false;
-    this.walkSpeed = 4.3; this.jumpForce = 7.5; this.gravity = 22; this.waterGravity = 6;
+    this.sprinting = false;
+    this.walkSpeed = 4.3; this.sprintSpeed = 6.5; this.jumpForce = 7.5; this.gravity = 22; this.waterGravity = 6;
     this.width = 0.6; this.height = 1.8; this.eyeHeight = 1.62;
+    this._np = new THREE.Vector3();
     // FIX-V1: Store bound references so we can remove them in dispose()
     this._kd = this._onKeyDown.bind(this);
     this._ku = this._onKeyUp.bind(this);
@@ -58,6 +60,7 @@ export class Player {
       case 'KeyA': this.moveLeft = true; break;
       case 'KeyD': this.moveRight = true; break;
       case 'Space': this.wantJump = true; break;
+      case 'ShiftLeft': case 'ShiftRight': this.sprinting = true; break;
       case 'Escape': if (document.pointerLockElement) document.exitPointerLock(); break;
     }
   }
@@ -69,6 +72,7 @@ export class Player {
       case 'KeyA': this.moveLeft = false; break;
       case 'KeyD': this.moveRight = false; break;
       case 'Space': this.wantJump = false; break;
+      case 'ShiftLeft': case 'ShiftRight': this.sprinting = false; break;
     }
   }
 
@@ -109,7 +113,7 @@ export class Player {
     if (this.moveLeft) dir.sub(rt);
     if (dir.length() > 0) dir.normalize();
 
-    const speed = this.isInWater ? this.walkSpeed * (0.3 + 0.2 * (1 - waterRatio)) : this.walkSpeed;
+    const speed = this.sprinting ? this.sprintSpeed : (this.isInWater ? this.walkSpeed * (0.3 + 0.2 * (1 - waterRatio)) : this.walkSpeed);
     const accel = this.isInWater ? 12 : 50;
     const fric = this.isInWater ? 8 : 12;
     this.velocity.x += dir.x * accel * dt;
@@ -140,7 +144,7 @@ export class Player {
       this.onGround = false;
     }
 
-    const np = this.position.clone();
+    const np = this._np.copy(this.position);
 
     np.x += this.velocity.x * dt;
     const xHit = this._findCollisionAxis(np, hw, this.height, getBlockAt, 'x');
@@ -204,7 +208,7 @@ export class Player {
     for (let x = mnX; x <= mxX; x++)
       for (let y = mnY; y <= mxY; y++)
         for (let z = mnZ; z <= mxZ; z++) {
-          if (y < 0 || y >= 255) continue;
+          if (y < 0 || y >= 256) continue;
           const b = gb(x, y, z);
           if (isBlockSolid(b)) {
             const overlapX = Math.min(pos.x + hw, x + 1) - Math.max(pos.x - hw, x);
