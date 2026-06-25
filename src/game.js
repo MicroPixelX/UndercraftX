@@ -78,12 +78,14 @@ export class Game {
       }
     }
 
+    const toRemove = [];
     for(const [k,ch] of this.chunks){
       if(!loaded.has(k)){
         ch.dispose(this.scene);
-        this.chunks.delete(k);
+        toRemove.push(k);
       }
     }
+    for(const k of toRemove) this.chunks.delete(k);
 
     for(const [,ch] of this.chunks){
       if(!ch.dirty){
