@@ -30,7 +30,15 @@ export class Renderer {
     this.dayTime = 0;
     this.daySpeed = 0.008;
 
-    const sg = new THREE.SphereGeometry(FOG_E*1.4, 32, 15);
+    this._fogDay = new THREE.Color(0x87CEEB);
+    this._fogNight = new THREE.Color(0x1a1a3e);
+    this._topDay = new THREE.Color(0x0077ff);
+    this._topNight = new THREE.Color(0x0a0a2a);
+    this._botDay = new THREE.Color(0x87CEEB);
+    this._botNight = new THREE.Color(0x1a1a3e);
+    this._lastDayCycle = -1;
+
+    const sg = new THREE.SphereGeometry(FOG_E*1.4, 16, 8);
     const sm = new THREE.ShaderMaterial({
       uniforms: {
         top:{value:new THREE.Color(0x0077ff)},
@@ -59,22 +67,18 @@ export class Renderer {
 
     this.dayTime += this.daySpeed;
     const cycle = (Math.sin(this.dayTime) + 1) * 0.5;
-    const sunI = 0.6 + cycle * 0.6;
-    const ambI = 0.2 + cycle * 0.35;
-    this.sun.intensity = sunI;
-    this.amb.intensity = ambI;
-
-    const fogDay = new THREE.Color(0x87CEEB);
-    const fogNight = new THREE.Color(0x1a1a3e);
-    this.scene.fog.color.lerpColors(fogNight, fogDay, cycle);
-    this.threeRenderer.setClearColor(this.scene.fog.color);
-
-    const topDay = new THREE.Color(0x0077ff);
-    const topNight = new THREE.Color(0x0a0a2a);
-    const botDay = new THREE.Color(0x87CEEB);
-    const botNight = new THREE.Color(0x1a1a3e);
-    this.sky.material.uniforms.top.value.lerpColors(topNight, topDay, cycle);
-    this.sky.material.uniforms.bot.value.lerpColors(botNight, botDay, cycle);
+    const cycleQ = Math.round(cycle * 20) / 20;
+    if (cycleQ !== this._lastDayCycle) {
+      this._lastDayCycle = cycleQ;
+      const sunI = 0.6 + cycleQ * 0.6;
+      const ambI = 0.2 + cycleQ * 0.35;
+      this.sun.intensity = sunI;
+      this.amb.intensity = ambI;
+      this.scene.fog.color.lerpColors(this._fogNight, this._fogDay, cycleQ);
+      this.threeRenderer.setClearColor(this.scene.fog.color);
+      this.sky.material.uniforms.top.value.lerpColors(this._topNight, this._topDay, cycleQ);
+      this.sky.material.uniforms.bot.value.lerpColors(this._botNight, this._botDay, cycleQ);
+    }
   }
   dispose(){window.removeEventListener('resize',this._onResize);}
 }
