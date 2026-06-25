@@ -36,6 +36,15 @@ const faces = [
 
 const WATER_MAT_CACHE = {};
 
+function clearWaterMaterialCache() {
+  for (const k of Object.keys(WATER_MAT_CACHE)) {
+    const m = WATER_MAT_CACHE[k];
+    if (m.map) m.map.dispose();
+    m.dispose();
+    delete WATER_MAT_CACHE[k];
+  }
+}
+
 function getWaterMaterial(blockId) {
   if (WATER_MAT_CACHE[blockId]) return WATER_MAT_CACHE[blockId];
   const block = BlockRegistry[blockId];
@@ -222,4 +231,4 @@ export class Chunk {
 
 const _fallbackMat = new THREE.MeshLambertMaterial({ color: 0xff00ff });
 
-export { SX as CHUNK_SIZE_X, SY as CHUNK_SIZE_Y, SZ as CHUNK_SIZE_Z };
+export { SX as CHUNK_SIZE_X, SY as CHUNK_SIZE_Y, SZ as CHUNK_SIZE_Z, clearWaterMaterialCache };
