@@ -45,10 +45,12 @@ export class Renderer {
     this.sky.renderOrder = -1;
     this.scene.add(this.sky);
 
-    window.addEventListener('resize', () => this._r());
+    this._onResize = () => this._r();
+    window.addEventListener('resize', this._onResize);
   }
 
   _r(){this.camera.aspect=window.innerWidth/window.innerHeight;this.camera.updateProjectionMatrix();this.threeRenderer.setSize(window.innerWidth,window.innerHeight);}
   render(){this.threeRenderer.render(this.scene,this.camera);}
   updateSky(p){this.sky.position.copy(p);this.sky.material.uniforms.camPos.value.copy(p);}
+  dispose(){window.removeEventListener('resize',this._onResize);}
 }
