@@ -1,7 +1,8 @@
 /**
  * renderer.js: Three.js + skybox shader + fog alinhado
- * FIX-R: Sky gradient now uses camera-relative coordinates so it doesn't
- *        shift color unnaturally when the player is at high Y levels
+ * FIX-R: Sky gradient now uses camera-relative coordinates
+ * FIX-V5: MSAA antialiasing disabled — contradicts the pixelated
+ *         NearestFilter aesthetic of the voxel textures
  */
 
 import * as THREE from 'three';
@@ -12,7 +13,8 @@ const FOG_S = (RD-1)*CS, FOG_E = RD*CS;
 export class Renderer {
   constructor(container) {
     this.container = container;
-    this.threeRenderer = new THREE.WebGLRenderer({ antialias: true });
+    // FIX-V5: antialias: false — MSAA smooths edges that NearestFilter keeps pixelated
+    this.threeRenderer = new THREE.WebGLRenderer({ antialias: false });
     this.threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.threeRenderer.setSize(window.innerWidth, window.innerHeight);
     this.threeRenderer.setClearColor(0x87CEEB);
@@ -27,7 +29,6 @@ export class Renderer {
     const hemi = new THREE.HemisphereLight(0x87CEEB, 0x8b5a2b, 0.3); this.scene.add(hemi);
 
     const sg = new THREE.SphereGeometry(FOG_E*1.4, 32, 15);
-    // FIX-R: Added camPos uniform so sky shader computes camera-relative direction
     const sm = new THREE.ShaderMaterial({
       uniforms: {
         top:{value:new THREE.Color(0x0077ff)},
