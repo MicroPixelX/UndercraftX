@@ -17,6 +17,10 @@ import { BlockID, BlockRegistry, isBlockTransparent, isBlockSolid } from '../blo
 
 const SX = 16, SY = 256, SZ = 16;
 
+const DECORATIVE_BLOCKS = new Set([BlockID.ROSE, BlockID.DANDELION, BlockID.TALL_GRASS]);
+
+function isDecorative(id) { return DECORATIVE_BLOCKS.has(id); }
+
 function safeMax(arr) {
   let m = 0;
   for (let i = 0; i < arr.length; i++) {
@@ -32,6 +36,11 @@ const faces = [
   { dir:[-1,0,0], verts:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]], uvs:[[1,0],[1,1],[0,1],[0,0]], mi:1 },
   { dir:[0,0,1],  verts:[[0,0,1],[1,0,1],[1,1,1],[0,1,1]], uvs:[[1,0],[0,0],[0,1],[1,1]], mi:4 },
   { dir:[0,0,-1], verts:[[1,0,0],[0,0,0],[0,1,0],[1,1,0]], uvs:[[1,0],[0,0],[0,1],[1,1]], mi:5 },
+];
+
+const CROSS_QUADS = [
+  { verts:[[0,0,0],[1,0,1],[1,1,1],[0,1,0]], uvs:[[0,0],[1,0],[1,1],[0,1]] },
+  { verts:[[1,0,0],[0,0,1],[0,1,1],[1,1,0]], uvs:[[0,0],[1,0],[1,1],[0,1]] },
 ];
 
 const WATER_MAT_CACHE = {};
@@ -98,6 +107,7 @@ export class Chunk {
   generateMesh(getNeighbor) {
     const groups = {};
     const waterPos = [], waterUv = [], waterIdx = [];
+    const decorPos = [], decorUv = [], decorIdx = [];
     const yLimit = this.maxY + 1;
 
     for (let x=0;x<SX;x++) for (let y=0;y<yLimit;y++) for (let z=0;z<SZ;z++) {
@@ -107,8 +117,24 @@ export class Chunk {
       if (!data) continue;
 
       const isWater = block === BlockID.WATER;
+      const isDecor = isDecorative(block);
       const gx = this.chunkX * SX + x;
       const gz = this.chunkZ * SZ + z;
+
+      if (isDecor) {
+        const mats = getBlockMaterials(block);
+        const mat = mats ? mats[0] : _fallbackMat;
+        for (let qi = 0; qi < CROSS_QUADS.length; qi++) {
+          const quad = CROSS_QUADS[qi];
+          const bi = decorPos.length / 3;
+          for (let vi=0;vi<4;vi++) {
+            decorPos.push(gx+quad.verts[vi][0], y+quad.verts[vi][1], gz+quad.verts[vi][2]);
+            decorUv.push(quad.uvs[vi][0], quad.uvs[vi][1]);
+          }
+          decorIdx.push(bi, bi+1, bi+2, bi, bi+2, bi+3);
+        }
+        continue;
+      }
 
       for (let fi=0;fi<faces.length;fi++) {
         const { dir, verts, uvs, mi } = faces[fi];
@@ -158,7 +184,7 @@ export class Chunk {
         g.idx.push(bi, bi+1, bi+2, bi, bi+2, bi+3);
       }
     }
-    return { solid: groups, water: { pos: waterPos, uv: waterUv, idx: waterIdx } };
+    return { solid: groups, water: { pos: waterPos, uv: waterUv, idx: waterIdx }, decor: { pos: decorPos, uv: decorUv, idx: decorIdx } };
   }
 
   buildMesh(scene, getNeighbor) {
@@ -189,6 +215,48 @@ export class Chunk {
 
       const mesh = new THREE.Mesh(geo, mat);
       this.meshGroup.add(mesh);
+    }
+
+    const dd = d.decor;
+    if (dd.pos.length > 0) {
+      const decorGroup = new THREE.Group();
+      const byBlock = {};
+      for (let x=0;x<SX;x++) for (let y=0;y<this.maxY+1;y++) for (let z=0;z<SZ;z++) {
+        const block = this.getBlock(x,y,z);
+        if (!isDecorative(block)) continue;
+        const gx = this.chunkX * SX + x;
+        const gz = this.chunkZ * SZ + z;
+        if (!byBlock[block]) byBlock[block] = { pos:[], uv:[], idx:[] };
+        const bg = byBlock[block];
+        for (let qi = 0; qi < CROSS_QUADS.length; qi++) {
+          const quad = CROSS_QUADS[qi];
+          const bi = bg.pos.length / 3;
+          for (let vi=0;vi<4;vi++) {
+            bg.pos.push(gx+quad.verts[vi][0], y+quad.verts[vi][1], gz+quad.verts[vi][2]);
+            bg.uv.push(quad.uvs[vi][0], quad.uvs[vi][1]);
+          }
+          bg.idx.push(bi, bi+1, bi+2, bi, bi+2, bi+3);
+        }
+      }
+      for (const bId of Object.keys(byBlock)) {
+        const bg = byBlock[bId];
+        if (bg.pos.length === 0) continue;
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(bg.pos, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(bg.uv, 2));
+        const maxDIdx = bg.idx.length > 0 ? Math.max(...bg.idx) : 0;
+        const DIndexArrayType = maxDIdx > 65535 ? Uint32Array : Uint16Array;
+        geo.setIndex(new THREE.BufferAttribute(new DIndexArrayType(bg.idx), 1));
+        geo.computeVertexNormals();
+        const mats = getBlockMaterials(Number(bId));
+        const mat = mats ? mats[0] : _fallbackMat;
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.renderOrder = 2;
+        decorGroup.add(mesh);
+      }
+      if (decorGroup.children.length > 0) {
+        this.meshGroup.add(decorGroup);
+      }
     }
 
     if (this.meshGroup.children.length > 0) {
