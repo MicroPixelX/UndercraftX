@@ -52,13 +52,7 @@ class UndercraftX {
     const val = this.seedInput ? this.seedInput.value.trim() : '';
     if (!val) return 42;
     const num = parseInt(val, 10);
-    if (!isNaN(num) && val === String(num)) return num;
-    let hash = 0;
-    for (let i = 0; i < val.length; i++) {
-      const ch = val.charCodeAt(i);
-      hash = ((hash << 5) - hash + ch) | 0;
-    }
-    return Math.abs(hash) || 42;
+    return isNaN(num) ? 42 : num;
   }
 
   _start() {
