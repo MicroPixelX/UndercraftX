@@ -13,7 +13,6 @@ const FOG_S = (RD-1)*CS, FOG_E = RD*CS;
 export class Renderer {
   constructor(container) {
     this.container = container;
-    // FIX-V5: antialias: false — MSAA smooths edges that NearestFilter keeps pixelated
     this.threeRenderer = new THREE.WebGLRenderer({ antialias: false });
     this.threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.threeRenderer.setSize(window.innerWidth, window.innerHeight);
@@ -24,9 +23,12 @@ export class Renderer {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x87CEEB, FOG_S, FOG_E);
 
-    const amb = new THREE.AmbientLight(0x8899bb, 0.5); this.scene.add(amb);
-    const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(100,200,100); this.scene.add(sun);
-    const hemi = new THREE.HemisphereLight(0x87CEEB, 0x8b5a2b, 0.3); this.scene.add(hemi);
+    this.amb = new THREE.AmbientLight(0x8899bb, 0.5); this.scene.add(this.amb);
+    this.sun = new THREE.DirectionalLight(0xffffff, 1.2); this.sun.position.set(100,200,100); this.scene.add(this.sun);
+    this.hemi = new THREE.HemisphereLight(0x87CEEB, 0x8b5a2b, 0.3); this.scene.add(this.hemi);
+
+    this.dayTime = 0;
+    this.daySpeed = 0.008;
 
     const sg = new THREE.SphereGeometry(FOG_E*1.4, 32, 15);
     const sm = new THREE.ShaderMaterial({
@@ -51,6 +53,28 @@ export class Renderer {
 
   _r(){this.camera.aspect=window.innerWidth/window.innerHeight;this.camera.updateProjectionMatrix();this.threeRenderer.setSize(window.innerWidth,window.innerHeight);}
   render(){this.threeRenderer.render(this.scene,this.camera);}
-  updateSky(p){this.sky.position.copy(p);this.sky.material.uniforms.camPos.value.copy(p);}
+  updateSky(p){
+    this.sky.position.copy(p);
+    this.sky.material.uniforms.camPos.value.copy(p);
+
+    this.dayTime += this.daySpeed;
+    const cycle = (Math.sin(this.dayTime) + 1) * 0.5;
+    const sunI = 0.6 + cycle * 0.6;
+    const ambI = 0.2 + cycle * 0.35;
+    this.sun.intensity = sunI;
+    this.amb.intensity = ambI;
+
+    const fogDay = new THREE.Color(0x87CEEB);
+    const fogNight = new THREE.Color(0x1a1a3e);
+    this.scene.fog.color.lerpColors(fogNight, fogDay, cycle);
+    this.threeRenderer.setClearColor(this.scene.fog.color);
+
+    const topDay = new THREE.Color(0x0077ff);
+    const topNight = new THREE.Color(0x0a0a2a);
+    const botDay = new THREE.Color(0x87CEEB);
+    const botNight = new THREE.Color(0x1a1a3e);
+    this.sky.material.uniforms.top.value.lerpColors(topNight, topDay, cycle);
+    this.sky.material.uniforms.bot.value.lerpColors(botNight, botDay, cycle);
+  }
   dispose(){window.removeEventListener('resize',this._onResize);}
 }
