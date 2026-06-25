@@ -155,8 +155,7 @@ export class TerrainGenerator {
     const continental = this.biomeNoise.fbm(wx * 0.0015, wz * 0.0015, 4);
     const detail = this.biomeDetailNoise.fbm(wx * 0.008, wz * 0.008, 3);
 
-    // Smaller oceans: only the deepest continental values become ocean
-    if (continental < -0.40) return BIOME.OCEAN;
+    if (continental < -0.60) return BIOME.OCEAN;
 
     const temp = detail + continental * 0.3;
     if (continental > 0.4 && detail > -0.1) return BIOME.MOUNTAINS;
@@ -254,14 +253,9 @@ export class TerrainGenerator {
 
     // No big caves at all (removed the large cave generator that made giant holes)
 
-    // Rock on steep slopes
     if (wy > gh && wy <= gh + 3) {
-      const hN = this.getHeight(wx, wz - 2);
-      const hS = this.getHeight(wx, wz + 2);
-      const hE = this.getHeight(wx + 2, wz);
-      const hW = this.getHeight(wx - 2, wz);
-      const maxDiff = Math.max(Math.abs(gh - hN), Math.abs(gh - hS), Math.abs(gh - hE), Math.abs(gh - hW));
-      if (maxDiff > 6 && wy > gh + 1) return BlockID.STONE;
+      const slopeNoise = this.detailNoise.noise2D(wx * 0.08, wz * 0.08);
+      if (Math.abs(slopeNoise) > 0.35 && wy > gh + 1) return BlockID.STONE;
     }
 
     if (wy < gh - 4) return BlockID.STONE;
@@ -287,34 +281,40 @@ export class TerrainGenerator {
   generateChunk(chunk) {
     const bx = chunk.chunkX * 16, bz = chunk.chunkZ * 16;
     const heightCache = new Int32Array(16 * 16);
+    const biomeCache = new Uint8Array(16 * 16);
 
     for (let lx = 0; lx < 16; lx++) for (let lz = 0; lz < 16; lz++) {
       const wx = bx + lx, wz = bz + lz;
-      const h = this.getHeight(wx, wz);
       const b = this.getBiome(wx, wz);
+      const h = b === BIOME.OCEAN ? this._getOceanHeight(wx, wz) : this.getHeight(wx, wz);
       heightCache[lx * 16 + lz] = h;
-      for (let y = 0; y < 256; y++) {
+      biomeCache[lx * 16 + lz] = b;
+      const maxY = b === BIOME.OCEAN ? this.seaLevel : h;
+      for (let y = 0; y <= maxY; y++) {
         const bl = this.getBlockAt(wx, y, wz, h, b);
         if (bl !== BlockID.AIR) chunk.setBlock(lx, y, lz, bl);
       }
+      if (b === BIOME.OCEAN) {
+        for (let y = h + 1; y <= this.seaLevel; y++) {
+          chunk.setBlock(lx, y, lz, BlockID.WATER);
+        }
+      }
     }
 
-    // Anti-float pass: fill overhangs under terrain to prevent floating blocks
     for (let lx = 0; lx < 16; lx++) for (let lz = 0; lz < 16; lz++) {
       const gh = heightCache[lx * 16 + lz];
+      const b = biomeCache[lx * 16 + lz];
+      if (b === BIOME.OCEAN) continue;
       let lastSolid = 0;
       for (let y = 0; y <= gh; y++) {
         const bl = chunk.getBlock(lx, y, lz);
         if (bl !== BlockID.AIR && bl !== BlockID.WATER) {
           lastSolid = y;
         } else if (bl === BlockID.AIR && y > 5 && y < gh) {
-          // Check if there's a significant gap of air below solid ground above
           const aboveBlock = chunk.getBlock(lx, y + 1, lz);
           if (aboveBlock !== BlockID.AIR && aboveBlock !== BlockID.WATER) {
-            // There's solid above and air here — check if there's solid well below
             const distBelow = y - lastSolid;
             if (distBelow > 3) {
-              // Fill air gap with stone to prevent floating platforms
               chunk.setBlock(lx, y, lz, BlockID.STONE);
             }
           }
@@ -322,11 +322,10 @@ export class TerrainGenerator {
       }
     }
 
-    // Trees
     for (let lx = 0; lx < 16; lx++) for (let lz = 0; lz < 16; lz++) {
       const wx = bx + lx, wz = bz + lz;
       const h = heightCache[lx * 16 + lz];
-      const b = this.getBiome(wx, wz);
+      const b = biomeCache[lx * 16 + lz];
 
       if (h <= this.seaLevel + 1) continue;
       if (b === BIOME.OCEAN) continue;
@@ -345,11 +344,11 @@ export class TerrainGenerator {
           break;
         case BIOME.FOREST:
           types = [TreeTypes[0], TreeTypes[1], TreeTypes[2]];
-          density = 0.018;
+          density = 0.06;
           break;
         case BIOME.JUNGLE:
           types = [TreeTypes[0], TreeTypes[2]];
-          density = 0.025;
+          density = 0.07;
           break;
         case BIOME.PLAINS:
           types = [TreeTypes[0], TreeTypes[3]];
@@ -377,6 +376,12 @@ export class TerrainGenerator {
         }
       }
     }
+  }
+
+  _getOceanHeight(wx, wz) {
+    const depth = this.continentNoise.fbm(wx * 0.01, wz * 0.01, 3);
+    const h = this.seaLevel - 3 + depth * 3;
+    return this._clamp(Math.floor(h));
   }
 
   _getBlockFromWorld(localChunk, bx, bz, wx, wy, wz) {
