@@ -79,6 +79,7 @@ export class Chunk {
     this.meshGroup = null;
     this.waterMesh = null;
     this.dirty = true;
+    this.maxY = 0;
   }
 
   idx(x, y, z) { return x + z * SX + y * SX * SZ; }
@@ -86,6 +87,7 @@ export class Chunk {
   setBlock(x, y, z, t) {
     if (x<0||x>=SX||y<0||y>=SY||z<0||z>=SZ) return;
     this.blocks[this.idx(x,y,z)] = t; this.dirty = true;
+    if (t !== 0 && y > this.maxY) this.maxY = y;
   }
 
   getBlock(x, y, z) {
@@ -96,8 +98,9 @@ export class Chunk {
   generateMesh(getNeighbor) {
     const groups = {};
     const waterPos = [], waterUv = [], waterIdx = [];
+    const yLimit = this.maxY + 1;
 
-    for (let x=0;x<SX;x++) for (let y=0;y<SY;y++) for (let z=0;z<SZ;z++) {
+    for (let x=0;x<SX;x++) for (let y=0;y<yLimit;y++) for (let z=0;z<SZ;z++) {
       const block = this.getBlock(x,y,z);
       if (block === BlockID.AIR) continue;
       const data = BlockRegistry[block];
