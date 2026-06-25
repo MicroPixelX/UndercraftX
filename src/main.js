@@ -76,6 +76,12 @@ class UndercraftX {
       this.player = null;
     }
 
+    // FIX-W2: Clear cached water materials — dispose GPU resources, prevent stale refs
+    clearWaterMaterialCache();
+
+    // FIX-W3: Reset _started flag so the Start button works after a game ends
+    this._started = false;
+
     this.startScreen.style.display = 'none';
     this.hud.show();
     this.game = new Game(this.scene, this.camera, this.container, seed);
