@@ -10,10 +10,11 @@
  *  - FIX-E: Ceiling collision at Y=255
  *  - FIX-F: Water slows the player and allows swimming up
  *  - FIX-J: isInWater checks multiple columns around the player
- *  - FIX-L: wantJump is now reset on Space keyup — prevents infinite water jumping
+ *  - FIX-L: wantJump is now reset on Space keyup
  *  - FIX-M: _findCollisionAxis finds block with smallest penetration on tested axis
- *           instead of first one found — prevents teleporting through walls
- *  - FIX-N: Virtual floor at Y=0 handled by simple clamp instead of fake block at y=-1
+ *  - FIX-N: Virtual floor at Y=0 handled by simple clamp
+ *  - FIX-V1: dispose() removes event listeners — prevents leak + duplicate input on restart
+ *  - FIX-V7: Water jump uses Math.max instead of hard-set — smoother swimming
  */
 
 import * as THREE from 'three';
@@ -29,19 +30,55 @@ export class Player {
     this.wantJump = false; this.isLocked = false; this.onGround = false; this.isInWater = false;
     this.walkSpeed = 4.3; this.jumpForce = 7.5; this.gravity = 22; this.waterGravity = 6;
     this.width = 0.6; this.height = 1.8; this.eyeHeight = 1.62;
+    // FIX-V1: Store bound references so we can remove them in dispose()
+    this._kd = this._onKeyDown.bind(this);
+    this._ku = this._onKeyUp.bind(this);
+    this._mm = this._onMouseMove.bind(this);
     this._setup();
   }
 
   _setup() {
-    document.addEventListener('keydown', e => this._kd(e));
-    document.addEventListener('keyup', e => this._ku(e));
-    document.addEventListener('mousemove', e => this._mm(e));
+    document.addEventListener('keydown', this._kd);
+    document.addEventListener('keyup', this._ku);
+    document.addEventListener('mousemove', this._mm);
   }
-  _kd(e){switch(e.code){case'KeyW':this.moveForward=true;break;case'KeyS':this.moveBackward=true;break;case'KeyA':this.moveLeft=true;break;case'KeyD':this.moveRight=true;break;case'Space':this.wantJump=true;break;case'Escape':if(document.pointerLockElement)document.exitPointerLock();break;}}
-  // FIX-L: Reset wantJump on Space keyup — prevents infinite water jumping
-  _ku(e){switch(e.code){case'KeyW':this.moveForward=false;break;case'KeyS':this.moveBackward=false;break;case'KeyA':this.moveLeft=false;break;case'KeyD':this.moveRight=false;break;case'Space':this.wantJump=false;break;}}
 
-  _mm(e){if(!this.isLocked)return;const s=0.002;this.yaw-=e.movementX*s;this.pitch-=e.movementY*s;this.pitch=Math.max(-Math.PI/2+0.01,Math.min(Math.PI/2-0.01,this.pitch));}
+  // FIX-V1: Remove all event listeners — call before creating a new Player
+  dispose() {
+    document.removeEventListener('keydown', this._kd);
+    document.removeEventListener('keyup', this._ku);
+    document.removeEventListener('mousemove', this._mm);
+    this.isLocked = false;
+  }
+
+  _onKeyDown(e) {
+    switch(e.code) {
+      case 'KeyW': this.moveForward = true; break;
+      case 'KeyS': this.moveBackward = true; break;
+      case 'KeyA': this.moveLeft = true; break;
+      case 'KeyD': this.moveRight = true; break;
+      case 'Space': this.wantJump = true; break;
+      case 'Escape': if (document.pointerLockElement) document.exitPointerLock(); break;
+    }
+  }
+
+  _onKeyUp(e) {
+    switch(e.code) {
+      case 'KeyW': this.moveForward = false; break;
+      case 'KeyS': this.moveBackward = false; break;
+      case 'KeyA': this.moveLeft = false; break;
+      case 'KeyD': this.moveRight = false; break;
+      case 'Space': this.wantJump = false; break;
+    }
+  }
+
+  _onMouseMove(e) {
+    if (!this.isLocked) return;
+    const s = 0.002;
+    this.yaw -= e.movementX * s;
+    this.pitch -= e.movementY * s;
+    this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
+  }
 
   update(delta, getBlockAt) {
     const dt = Math.min(delta, 0.05);
@@ -64,19 +101,23 @@ export class Player {
     const waterRatio = inWaterCount / totalChecks;
 
     const dir = new THREE.Vector3();
-    const fwd = new THREE.Vector3(-Math.sin(this.yaw),0,-Math.cos(this.yaw));
-    const rt = new THREE.Vector3(Math.cos(this.yaw),0,-Math.sin(this.yaw));
-    if(this.moveForward)dir.add(fwd); if(this.moveBackward)dir.sub(fwd);
-    if(this.moveRight)dir.add(rt); if(this.moveLeft)dir.sub(rt);
-    if(dir.length()>0)dir.normalize();
+    const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const rt = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    if (this.moveForward) dir.add(fwd);
+    if (this.moveBackward) dir.sub(fwd);
+    if (this.moveRight) dir.add(rt);
+    if (this.moveLeft) dir.sub(rt);
+    if (dir.length() > 0) dir.normalize();
 
     const speed = this.isInWater ? this.walkSpeed * (0.3 + 0.2 * (1 - waterRatio)) : this.walkSpeed;
     const accel = this.isInWater ? 12 : 50;
     const fric = this.isInWater ? 8 : 12;
-    this.velocity.x += dir.x*accel*dt; this.velocity.z += dir.z*accel*dt;
-    this.velocity.x *= Math.max(0,1-fric*dt); this.velocity.z *= Math.max(0,1-fric*dt);
-    const hs = Math.sqrt(this.velocity.x**2+this.velocity.z**2);
-    if(hs>speed){this.velocity.x=(this.velocity.x/hs)*speed;this.velocity.z=(this.velocity.z/hs)*speed;}
+    this.velocity.x += dir.x * accel * dt;
+    this.velocity.z += dir.z * accel * dt;
+    this.velocity.x *= Math.max(0, 1 - fric * dt);
+    this.velocity.z *= Math.max(0, 1 - fric * dt);
+    const hs = Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2);
+    if (hs > speed) { this.velocity.x = (this.velocity.x / hs) * speed; this.velocity.z = (this.velocity.z / hs) * speed; }
 
     const g = this.isInWater ? this.waterGravity : this.gravity;
     this.velocity.y -= g * dt;
@@ -91,16 +132,16 @@ export class Player {
       this.velocity.y = Math.max(this.velocity.y, -50);
     }
 
-    if(this.isInWater && this.wantJump){
-      this.velocity.y = 3;
-    } else if(this.wantJump && this.onGround && !this.isInWater){
+    // FIX-V7: Water jump uses Math.max instead of hard-set — smoother swimming
+    if (this.isInWater && this.wantJump) {
+      this.velocity.y = Math.max(this.velocity.y, 3);
+    } else if (this.wantJump && this.onGround && !this.isInWater) {
       this.velocity.y = this.jumpForce;
       this.onGround = false;
     }
 
     const np = this.position.clone();
 
-    // X axis
     np.x += this.velocity.x * dt;
     const xHit = this._findCollisionAxis(np, hw, this.height, getBlockAt, 'x');
     if (xHit) {
@@ -112,11 +153,9 @@ export class Player {
       this.velocity.x = 0;
     }
 
-    // Y axis
     np.y += this.velocity.y * dt;
     this.onGround = false;
 
-    // FIX-N: Simple clamp for world floor instead of fake block at y=-1
     if (np.y < 0) { np.y = 0; this.velocity.y = 0; this.onGround = true; }
 
     if (np.y + this.height > 255) {
@@ -135,7 +174,6 @@ export class Player {
       this.velocity.y = 0;
     }
 
-    // Z axis
     np.z += this.velocity.z * dt;
     const zHit = this._findCollisionAxis(np, hw, this.height, getBlockAt, 'z');
     if (zHit) {
@@ -149,13 +187,12 @@ export class Player {
 
     this.position.copy(np);
 
-    this.camera.position.set(this.position.x,this.position.y+this.eyeHeight,this.position.z);
-    this.camera.rotation.order='YXZ';
-    this.camera.rotation.y=this.yaw; this.camera.rotation.x=this.pitch;
+    this.camera.position.set(this.position.x, this.position.y + this.eyeHeight, this.position.z);
+    this.camera.rotation.order = 'YXZ';
+    this.camera.rotation.y = this.yaw;
+    this.camera.rotation.x = this.pitch;
   }
 
-  // FIX-M: Per-axis collision finder — finds the block with the SMALLEST
-  // penetration on the tested axis to prevent teleporting through walls
   _findCollisionAxis(pos, hw, h, gb, axis) {
     const mnX = Math.floor(pos.x - hw), mxX = Math.floor(pos.x + hw);
     const mnY = Math.floor(pos.y), mxY = Math.floor(pos.y + h);
