@@ -32,6 +32,9 @@ export class Player {
     this.walkSpeed = 4.3; this.sprintSpeed = 6.5; this.jumpForce = 7.5; this.gravity = 22; this.waterGravity = 6;
     this.width = 0.6; this.height = 1.8; this.eyeHeight = 1.62;
     this._np = new THREE.Vector3();
+    this._dir = new THREE.Vector3();
+    this._fwd = new THREE.Vector3();
+    this._rt = new THREE.Vector3();
     // FIX-V1: Store bound references so we can remove them in dispose()
     this._kd = this._onKeyDown.bind(this);
     this._ku = this._onKeyUp.bind(this);
@@ -104,9 +107,9 @@ export class Player {
     this.isInWater = inWaterCount > 0;
     const waterRatio = inWaterCount / totalChecks;
 
-    const dir = new THREE.Vector3();
-    const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    const rt = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    const dir = this._dir.set(0,0,0);
+    const fwd = this._fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const rt = this._rt.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     if (this.moveForward) dir.add(fwd);
     if (this.moveBackward) dir.sub(fwd);
     if (this.moveRight) dir.add(rt);
