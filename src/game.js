@@ -87,6 +87,7 @@ export class Game {
     }
     for(const k of toRemove) this.chunks.delete(k);
 
+    let rebuiltCount = 0;
     for(const [,ch] of this.chunks){
       if(!ch.dirty){
         const ncx = ch.chunkX, ncz = ch.chunkZ;
@@ -106,6 +107,8 @@ export class Game {
     for(const [,ch] of this.chunks){
       if(ch.dirty){
         ch.buildMesh(this.scene,(gx,gy,gz)=>this.getNeighborBlock(gx,gy,gz));
+        rebuiltCount++;
+        if(rebuiltCount >= 4) break;
       }
     }
   }
@@ -164,7 +167,9 @@ export class Game {
       ch.dispose(this.scene);
     }
     this.chunks.clear();
+    this.terrain = null;
     this.cx = NaN;
     this.cz = NaN;
+    this.throttle = 9;
   }
 }
