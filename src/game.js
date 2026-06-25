@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { Chunk } from './world/chunk.js';
 import { TerrainGenerator, BIOME, BIOME_NAMES } from './world/terrain.js';
-import { BlockID, isBlockSolid, initBlockTextures } from './blocks/Block.js';
+import { BlockID, isBlockSolid, isBlockTransparent, initBlockTextures, BlockRegistry } from './blocks/Block.js';
 import './blocks/index.js';
 
 const RD = 4, CS = 16, CH = 256;
@@ -171,5 +171,85 @@ export class Game {
     this.cx = NaN;
     this.cz = NaN;
     this.throttle = 9;
+  }
+
+  raycastBlock(origin, direction, maxDist = 6) {
+    const dx = direction.x, dy = direction.y, dz = direction.z;
+    let x = Math.floor(origin.x), y = Math.floor(origin.y), z = Math.floor(origin.z);
+    const stepX = dx >= 0 ? 1 : -1;
+    const stepY = dy >= 0 ? 1 : -1;
+    const stepZ = dz >= 0 ? 1 : -1;
+    const tDeltaX = dx !== 0 ? Math.abs(1 / dx) : Infinity;
+    const tDeltaY = dy !== 0 ? Math.abs(1 / dy) : Infinity;
+    const tDeltaZ = dz !== 0 ? Math.abs(1 / dz) : Infinity;
+    let tMaxX = dx !== 0 ? ((dx > 0 ? (x + 1 - origin.x) : (origin.x - x)) * tDeltaX) : Infinity;
+    let tMaxY = dy !== 0 ? ((dy > 0 ? (y + 1 - origin.y) : (origin.y - y)) * tDeltaY) : Infinity;
+    let tMaxZ = dz !== 0 ? ((dz > 0 ? (z + 1 - origin.z) : (origin.z - z)) * tDeltaZ) : Infinity;
+    let dist = 0;
+    let face = { x: 0, y: 0, z: 0 };
+
+    while (dist < maxDist) {
+      const block = this.getBlockAt(x, y, z);
+      if (block !== BlockID.AIR && block !== BlockID.WATER && (isBlockSolid(block) || isBlockTransparent(block))) {
+        return { x, y, z, block, face, dist };
+      }
+
+      if (tMaxX < tMaxY) {
+        if (tMaxX < tMaxZ) {
+          dist = tMaxX; x += stepX; tMaxX += tDeltaX;
+          face = { x: -stepX, y: 0, z: 0 };
+        } else {
+          dist = tMaxZ; z += stepZ; tMaxZ += tDeltaZ;
+          face = { x: 0, y: 0, z: -stepZ };
+        }
+      } else {
+        if (tMaxY < tMaxZ) {
+          dist = tMaxY; y += stepY; tMaxY += tDeltaY;
+          face = { x: 0, y: -stepY, z: 0 };
+        } else {
+          dist = tMaxZ; z += stepZ; tMaxZ += tDeltaZ;
+          face = { x: 0, y: 0, z: -stepZ };
+        }
+      }
+    }
+    return null;
+  }
+
+  breakBlock(bx, by, bz) {
+    const cx = Math.floor(bx / CS), cz = Math.floor(bz / CS);
+    const ch = this.chunks.get(this.key(cx, cz));
+    if (!ch) return false;
+    const lx = ((bx % CS) + CS) % CS, lz = ((bz % CS) + CS) % CS;
+    const block = ch.getBlock(lx, by, lz);
+    if (block === BlockID.AIR || block === BlockID.BEDROCK) return false;    ch.setBlock(lx, by, lz, BlockID.AIR);
+    this._markDirty(cx, cz);
+    if (lx === 0) this._markDirty(cx-1, cz);
+    if (lx === 15) this._markDirty(cx+1, cz);
+    if (lz === 0) this._markDirty(cx, cz-1);
+    if (lz === 15) this._markDirty(cx, cz+1);
+    return true;
+  }
+
+  placeBlock(bx, by, bz, face) {
+    const px = bx + face.x, py = by + face.y, pz = bz + face.z;
+    if (py < 0 || py >= CH) return false;
+    const cx = Math.floor(px / CS), cz = Math.floor(pz / CS);
+    const ch = this.chunks.get(this.key(cx, cz));
+    if (!ch) return false;
+    const lx = ((px % CS) + CS) % CS, lz = ((pz % CS) + CS) % CS;
+    const existing = ch.getBlock(lx, py, lz);
+    if (existing !== BlockID.AIR && existing !== BlockID.WATER) return false;
+    ch.setBlock(lx, py, lz, BlockID.DIRT);
+    this._markDirty(cx, cz);
+    if (lx === 0) this._markDirty(cx-1, cz);
+    if (lx === 15) this._markDirty(cx+1, cz);
+    if (lz === 0) this._markDirty(cx, cz-1);
+    if (lz === 15) this._markDirty(cx, cz+1);
+    return true;
+  }
+
+  _markDirty(cx, cz) {
+    const ch = this.chunks.get(this.key(cx, cz));
+    if (ch) ch.dirty = true;
   }
 }
