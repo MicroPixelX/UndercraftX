@@ -33,6 +33,7 @@ class UndercraftX {
     this.camera = this.renderer.camera;
     this.scene = this.renderer.scene;
     this.hud = new HUD(); this.hud.hide();
+    this.waterOverlay = document.getElementById('water-overlay');
     this.startBtn.addEventListener('click', () => this._start());
     this._onContainerClick = () => {
       if (this.isRunning) this.container.requestPointerLock();
@@ -108,12 +109,42 @@ class UndercraftX {
     this.lastTime = now;
     this.player.update(dt, (x, y, z) => this.game.getBlockAt(x, y, z));
     this.game.update(this.player.position);
+
+    const breakResult = this.player.updateBreaking(dt, this.game);
+    if (breakResult) {
+      if (breakResult.action === 'break') {
+        this.game.breakBlock(breakResult.x, breakResult.y, breakResult.z);
+      } else if (breakResult.action === 'place') {
+        const origin = this.player.getRayOrigin();
+        const direction = this.player.getLookDirection();
+        const hit = this.game.raycastBlock(origin, direction);
+        if (hit) {
+          this.game.placeBlock(hit.x, hit.y, hit.z, hit.face);
+        }
+      }
+    }
+
     this.renderer.updateSky(this.camera.position);
     this.renderer.render();
+
+    if (this.waterOverlay) {
+      this.waterOverlay.style.display = this.player.isInWater ? 'block' : 'none';
+    }
+
     const pcx = Math.floor(this.player.position.x / 16);
     const pcz = Math.floor(this.player.position.z / 16);
     const biome = this.game.getBiomeAt(Math.floor(this.player.position.x), Math.floor(this.player.position.z));
-    this.hud.update(this.player.position, { x: pcx, z: pcz }, biome);
+    const breakInfo = this.player.breakTarget ? (() => {
+      const origin = this.player.getRayOrigin();
+      const direction = this.player.getLookDirection();
+      const hit = this.game.raycastBlock(origin, direction);
+      if (hit) {
+        const bt = this.player.BREAK_TIMES[hit.block] ?? 1.5;
+        return { progress: this.player.breakProgress, time: bt };
+      }
+      return null;
+    })() : null;
+    this.hud.update(this.player.position, { x: pcx, z: pcz }, biome, breakInfo);
     requestAnimationFrame(t => this._loop(t));
   }
 }
