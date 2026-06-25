@@ -37,7 +37,7 @@ export class Game {
     this.chunks = new Map();
     this.terrain = new TerrainGenerator(seed);
     this.cx = NaN; this.cz = NaN;
-    this.throttle = 9;
+    this.throttle = 1;
   }
 
   key(cx,cz){return `${cx},${cz}`;}
@@ -108,14 +108,14 @@ export class Game {
       if(ch.dirty){
         ch.buildMesh(this.scene,(gx,gy,gz)=>this.getNeighborBlock(gx,gy,gz));
         rebuiltCount++;
-        if(rebuiltCount >= 4) break;
+        if(rebuiltCount >= 8) break;
       }
     }
   }
 
   update(pos){
     this.throttle++;
-    if(this.throttle>=10){
+    if(this.throttle>=3){
       this.throttle=0;
       this.updateChunks(pos.x,pos.z);
     }
