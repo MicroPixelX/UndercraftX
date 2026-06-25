@@ -6,9 +6,9 @@
  *  - #11: getSpawnPosition now uses the seeded PRNG instead of Math.random()
  *  - #12: updateChunks double-rebuild fix
  *  - FIX-G: getSpawnPosition checks that the spawn area is clear of solid blocks
- *  - FIX-P: getBlockAt now floors wx and wz — prevents wrong block lookups
- *           when called with float coordinates from player collision
- *  - FIX-Q: updateChunks throttle starts at threshold so first update() runs immediately
+ *  - FIX-P: getBlockAt now floors wx and wz
+ *  - FIX-Q: updateChunks throttle starts at threshold
+ *  - FIX-V6: _isSpawnClear also rejects underwater spawn positions
  */
 
 import * as THREE from 'three';
@@ -37,13 +37,11 @@ export class Game {
     this.chunks = new Map();
     this.terrain = new TerrainGenerator(seed);
     this.cx = NaN; this.cz = NaN;
-    // FIX-Q: Start throttle at threshold so first update() runs immediately
     this.throttle = 9;
   }
 
   key(cx,cz){return `${cx},${cz}`;}
 
-  // FIX-P: Floor wx/wz to handle float coordinates from player collision
   getBlockAt(wx,wy,wz){
     wx = Math.floor(wx);
     wz = Math.floor(wz);
@@ -120,13 +118,17 @@ export class Game {
 
   isSolidAt(wx,wy,wz){return isBlockSolid(this.getBlockAt(Math.floor(wx),Math.floor(wy),Math.floor(wz)));}
 
+  // FIX-V6: Also reject spawn positions that are underwater
   _isSpawnClear(sx, sy, sz) {
     const hw = 0.3;
     const mh = 1.8;
     for (let x = Math.floor(sx - hw); x <= Math.floor(sx + hw); x++)
       for (let y = Math.floor(sy); y <= Math.floor(sy + mh); y++)
         for (let z = Math.floor(sz - hw); z <= Math.floor(sz + hw); z++) {
-          if (isBlockSolid(this.getBlockAt(x, y, z))) return false;
+          const b = this.getBlockAt(x, y, z);
+          if (isBlockSolid(b)) return false;
+          // FIX-V6: Reject if feet are in water
+          if (y === Math.floor(sy) && b === BlockID.WATER) return false;
         }
     return true;
   }
@@ -155,7 +157,6 @@ export class Game {
     return BIOME_NAMES[b]||'?';
   }
 
-  // FIX-O: Allow disposal of all chunks (for game restart)
   dispose() {
     for (const [,ch] of this.chunks) {
       ch.dispose(this.scene);
