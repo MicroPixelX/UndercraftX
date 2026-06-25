@@ -7,6 +7,8 @@
  *  - #2: Tree cross-chunk clipping — trimmed leaf placement to chunk bounds
  *  - FIX-D: Use Uint32 index buffer to prevent index overflow on dense chunks
  *           (vertices can exceed 65535 in chunks with caves, forests, or mountains)
+ *  - FIX-K: Replaced Math.max(...array) with reduce to avoid stack overflow
+ *           on large index arrays (dense chunks can have 100k+ indices)
  */
 
 import * as THREE from 'three';
@@ -14,7 +16,6 @@ import { BlockID, BlockRegistry, isBlockTransparent, isBlockSolid } from '../blo
 
 const SX = 16, SY = 256, SZ = 16;
 
-// Cores base por tipo de bloco
 const BLOCK_COLORS = {
   [BlockID.GRASS]:         { top: [0.36,0.64,0.18], side: [0.55,0.35,0.17], bottom: [0.55,0.35,0.17] },
   [BlockID.DIRT]:          { top: [0.55,0.35,0.17], side: [0.55,0.35,0.17], bottom: [0.55,0.35,0.17] },
@@ -40,7 +41,6 @@ function getBlockColor(blockId, faceDir) {
   return c.side;
 }
 
-// FIX #4: Shared material instances — never created per rebuild
 let _solidMaterial = null;
 let _waterMaterial = null;
 
@@ -59,6 +59,15 @@ function getWaterMaterial() {
     });
   }
   return _waterMaterial;
+}
+
+// FIX-K: Safe max for potentially huge arrays — avoids Math.max(...arr) stack overflow
+function safeMax(arr) {
+  let m = 0;
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i] > m) m = arr[i];
+  }
+  return m;
 }
 
 export class Chunk {
@@ -136,7 +145,6 @@ export class Chunk {
   }
 
   buildMesh(scene, getNeighbor) {
-    // FIX #4: Only dispose geometry, not the shared material
     this.disposeGeo(scene);
 
     const d = this.generateMesh(getNeighbor);
@@ -145,10 +153,8 @@ export class Chunk {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(d.solid.pos, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(d.solid.col, 3));
-      // FIX-D: Always use Uint32 indices to prevent overflow on dense chunks.
-      // Dense chunks (caves, forests, mountains) can exceed 65535 vertices,
-      // which silently corrupts the mesh with Uint16 indices.
-      const maxIdx = Math.max(...d.solid.idx, 0);
+      // FIX-D + FIX-K: Use safeMax instead of Math.max(...spread) to avoid stack overflow
+      const maxIdx = safeMax(d.solid.idx);
       const IndexArrayType = maxIdx > 65535 ? Uint32Array : Uint16Array;
       g.setIndex(new THREE.BufferAttribute(new IndexArrayType(d.solid.idx), 1));
       g.computeVertexNormals();
@@ -162,8 +168,8 @@ export class Chunk {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(d.water.pos, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(d.water.col, 3));
-      // FIX-D: Same Uint32 fix for water mesh
-      const maxWIdx = Math.max(...d.water.idx, 0);
+      // FIX-D + FIX-K: Same safeMax fix for water mesh
+      const maxWIdx = safeMax(d.water.idx);
       const WIndexArrayType = maxWIdx > 65535 ? Uint32Array : Uint16Array;
       g.setIndex(new THREE.BufferAttribute(new WIndexArrayType(d.water.idx), 1));
       g.computeVertexNormals();
@@ -175,13 +181,11 @@ export class Chunk {
     this.dirty = false;
   }
 
-  // FIX #4: Only dispose geometry (not shared material)
   disposeGeo(scene) {
     if (this.mesh) { scene.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh = null; }
     if (this.waterMesh) { scene.remove(this.waterMesh); this.waterMesh.geometry.dispose(); this.waterMesh = null; }
   }
 
-  // Full dispose (for chunk unload) — still doesn't dispose shared materials
   dispose(scene) {
     this.disposeGeo(scene);
   }
