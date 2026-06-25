@@ -55,8 +55,66 @@ export class Renderer {
     this.sky.renderOrder = -1;
     this.scene.add(this.sky);
 
+    this._sunObj = null;
+    this._moonObj = null;
+    this._createSun();
+
+    this._cloudGroup = null;
+    this._cloudTime = 0;
+    this._createClouds();
+
     this._onResize = () => this._r();
     window.addEventListener('resize', this._onResize);
+  }
+
+  _createSun() {
+    const sunGeo = new THREE.SphereGeometry(8, 8, 8);
+    const sunMat = new THREE.MeshBasicMaterial({ color: 0xffee44 });
+    this._sunObj = new THREE.Mesh(sunGeo, sunMat);
+    this._sunObj.renderOrder = -2;
+    this.scene.add(this._sunObj);
+
+    const moonGeo = new THREE.SphereGeometry(5, 8, 8);
+    const moonMat = new THREE.MeshBasicMaterial({ color: 0xccccee });
+    this._moonObj = new THREE.Mesh(moonGeo, moonMat);
+    this._moonObj.renderOrder = -2;
+    this.scene.add(this._moonObj);
+  }
+
+  _createClouds() {
+    this._cloudGroup = new THREE.Group();
+    const cloudMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.7,
+      side: THREE.DoubleSide, depthWrite: false,
+    });
+
+    const rng = this._cloudRng(42);
+    for (let i = 0; i < 35; i++) {
+      const cloudGeo = new THREE.PlaneGeometry(
+        12 + rng() * 20,
+        12 + rng() * 20
+      );
+      const cloud = new THREE.Mesh(cloudGeo, cloudMat);
+      cloud.position.set(
+        (rng() - 0.5) * FOG_E * 2,
+        100 + rng() * 20,
+        (rng() - 0.5) * FOG_E * 2
+      );
+      cloud.rotation.x = -Math.PI / 2;
+      cloud.renderOrder = -1;
+      this._cloudGroup.add(cloud);
+    }
+    this.scene.add(this._cloudGroup);
+  }
+
+  _cloudRng(seed) {
+    let s = seed | 0;
+    return function() {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      let t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
   }
 
   _r(){this.camera.aspect=window.innerWidth/window.innerHeight;this.camera.updateProjectionMatrix();this.threeRenderer.setSize(window.innerWidth,window.innerHeight);}
@@ -78,7 +136,54 @@ export class Renderer {
       this.threeRenderer.setClearColor(this.scene.fog.color);
       this.sky.material.uniforms.top.value.lerpColors(this._topNight, this._topDay, cycleQ);
       this.sky.material.uniforms.bot.value.lerpColors(this._botNight, this._botDay, cycleQ);
+
+      if (this._sunObj) {
+        this._sunObj.visible = cycleQ > 0.15;
+        this._sunObj.material.color.setHex(cycleQ > 0.3 ? 0xffee44 : 0xff8822);
+      }
+      if (this._moonObj) {
+        this._moonObj.visible = cycleQ < 0.4;
+      }
+    }
+
+    const sunAngle = this.dayTime * 0.3;
+    const sunDist = FOG_E * 0.8;
+    if (this._sunObj) {
+      this._sunObj.position.set(
+        p.x + Math.cos(sunAngle) * sunDist,
+        p.y + Math.sin(sunAngle) * sunDist,
+        p.z
+      );
+    }
+    if (this._moonObj) {
+      this._moonObj.position.set(
+        p.x + Math.cos(sunAngle + Math.PI) * sunDist,
+        p.y + Math.sin(sunAngle + Math.PI) * sunDist,
+        p.z
+      );
+    }
+
+    this._cloudTime += 0.02;
+    if (this._cloudGroup) {
+      this._cloudGroup.position.set(
+        p.x + Math.sin(this._cloudTime * 0.1) * 10,
+        0,
+        p.z + Math.cos(this._cloudTime * 0.08) * 8
+      );
+      const cloudAlpha = 0.3 + cycleQ * 0.45;
+      this._cloudGroup.traverse(c => {
+        if (c.material && c.material.opacity !== undefined) c.material.opacity = cloudAlpha;
+      });
     }
   }
-  dispose(){window.removeEventListener('resize',this._onResize);}
+  dispose(){
+    window.removeEventListener('resize',this._onResize);
+    if (this._sunObj) { this.scene.remove(this._sunObj); this._sunObj.geometry.dispose(); this._sunObj.material.dispose(); this._sunObj = null; }
+    if (this._moonObj) { this.scene.remove(this._moonObj); this._moonObj.geometry.dispose(); this._moonObj.material.dispose(); this._moonObj = null; }
+    if (this._cloudGroup) {
+      this._cloudGroup.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+      this.scene.remove(this._cloudGroup);
+      this._cloudGroup = null;
+    }
+  }
 }
