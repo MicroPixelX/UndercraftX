@@ -12,7 +12,7 @@ import { BlockID } from '../blocks/Block.js';
 export class TreePine {
   static get chance() { return 0.006; }
   static get minGround() { return 12; }
-  static place(chunk, lx, ly, lz, rng = Math.random, _getWorld = null, _bx = 0, _bz = 0) {
+  static place(chunk, lx, ly, lz, rng = Math.random) {
     const trunkH = 5 + Math.floor(rng() * 3);
 
     // Place trunk
