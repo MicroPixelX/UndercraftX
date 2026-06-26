@@ -12,7 +12,7 @@ import { BlockID } from '../blocks/Block.js';
 export class TreeCactus {
   static get chance() { return 0.004; }
   static get minGround() { return 8; }
-  static place(chunk, lx, ly, lz, rng = Math.random, _getWorld = null, _bx = 0, _bz = 0) {
+  static place(chunk, lx, ly, lz, rng = Math.random) {
     const h = 2 + Math.floor(rng() * 3);
     // FIX-I: Check AIR before placing trunk blocks
     for (let y = 0; y < h; y++) {
