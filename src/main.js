@@ -1,6 +1,7 @@
 /**
  * main.js: Entry point
  * + Seed input para gerar mundos diferentes
+ * + Loading bar during world generation
  *
  * FIX #1: Seed is now passed to texture generator for deterministic textures
  * FIX-O: Double-click guard on start button
@@ -22,6 +23,9 @@ class UndercraftX {
     this.startScreen = document.getElementById('start-screen');
     this.startBtn = document.getElementById('start-btn');
     this.seedInput = document.getElementById('seed-input');
+    this.loadingBar = document.getElementById('loading-bar');
+    this.loadingFill = document.getElementById('loading-fill');
+    this.loadingText = document.getElementById('loading-text');
     this.isRunning = false;
     this.lastTime = 0;
     this._started = false;
@@ -55,12 +59,21 @@ class UndercraftX {
     return isNaN(num) ? 42 : num;
   }
 
+  _showLoading(pct, text) {
+    if (this.loadingBar) this.loadingBar.style.display = 'flex';
+    if (this.loadingFill) this.loadingFill.style.width = `${pct}%`;
+    if (this.loadingText) this.loadingText.textContent = text;
+  }
+
+  _hideLoading() {
+    if (this.loadingBar) this.loadingBar.style.display = 'none';
+  }
+
   _start() {
     if (this._started) return;
     this._started = true;
 
     const seed = this._getSeed();
-
     setTextureSeed(seed);
 
     if (this.game) {
@@ -84,20 +97,72 @@ class UndercraftX {
     this.container.removeEventListener('contextmenu', this._onContextMenu);
 
     this.startScreen.style.display = 'none';
-    this.hud.show();
+
+    this._showLoading(0, 'Gerando terreno...');
+
     this.game = new Game(this.scene, this.camera, this.container, seed);
     this.player = new Player(this.camera, this.container);
+
     this.container.addEventListener('click', this._onContainerClick);
     document.addEventListener('pointerlockchange', this._onPointerLockChange);
     this.container.addEventListener('contextmenu', this._onContextMenu);
+
     const spawn = this.game.getSpawnPosition();
     this.player.position.copy(spawn);
     this.game.updateChunks(spawn.x, spawn.z);
+
+    this._buildChunksAsync(seed);
+  }
+
+  _buildChunksAsync(seed) {
+    const total = this.game.chunks.size;
+    let built = 0;
+    const getNeighbor = (gx, gy, gz) => this.game.getNeighborBlock(gx, gy, gz);
+    const dirtyChunks = [];
+
+    for (const [, ch] of this.game.chunks) {
+      if (ch.dirty) dirtyChunks.push(ch);
+    }
+
+    const batchSize = 3;
+    let idx = 0;
+
+    const step = () => {
+      const end = Math.min(idx + batchSize, dirtyChunks.length);
+      for (let i = idx; i < end; i++) {
+        dirtyChunks[i].buildMesh(this.scene, getNeighbor);
+        built++;
+      }
+      idx = end;
+
+      const pct = Math.floor((built / dirtyChunks.length) * 100);
+      this._showLoading(pct, `Construindo mundo... ${built}/${dirtyChunks.length}`);
+
+      this.renderer.updateSky(this.camera.position);
+      this.renderer.render();
+
+      if (idx < dirtyChunks.length) {
+        requestAnimationFrame(step);
+      } else {
+        this._finishStart(seed);
+      }
+    };
+
+    if (dirtyChunks.length === 0) {
+      this._finishStart(seed);
+    } else {
+      requestAnimationFrame(step);
+    }
+  }
+
+  _finishStart(seed) {
+    this._hideLoading();
+    this.hud.show();
+    this.hud.setSeed(seed);
     this.container.requestPointerLock();
     this.player.isLocked = true;
     this.isRunning = true;
     this.lastTime = performance.now();
-    this.hud.setSeed(seed);
     requestAnimationFrame(t => this._loop(t));
     this._started = false;
   }
