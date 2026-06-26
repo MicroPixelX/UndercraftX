@@ -121,6 +121,22 @@ export class Game {
     }
   }
 
+  forceBuildAll(getNeighbor) {
+    for (const [, ch] of this.chunks) {
+      if (ch.dirty) {
+        ch.buildMesh(this.scene, getNeighbor || ((gx, gy, gz) => this.getNeighborBlock(gx, gy, gz)));
+      }
+    }
+  }
+
+  getInitialChunkCount() {
+    let count = 0;
+    for (let dx = -RD; dx <= RD; dx++)
+      for (let dz = -RD; dz <= RD; dz++)
+        count++;
+    return count;
+  }
+
   isSolidAt(wx,wy,wz){return isBlockSolid(this.getBlockAt(Math.floor(wx),Math.floor(wy),Math.floor(wz)));}
 
   // FIX-V6: Also reject spawn positions that are underwater
