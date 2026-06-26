@@ -9,7 +9,7 @@ import { BlockID } from '../blocks/Block.js';
 export class TreeOak {
   static get chance() { return 0.008; }
   static get minGround() { return 10; }
-  static place(chunk, lx, ly, lz, rng = Math.random, _getWorld = null, _bx = 0, _bz = 0) {
+  static place(chunk, lx, ly, lz, rng = Math.random) {
     const h = 4 + Math.floor(rng() * 3);
     for (let y = 0; y < h; y++) chunk.setBlock(lx, ly + y, lz, BlockID.OAK_LOG);
     const cy = ly + h;
