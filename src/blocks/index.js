@@ -14,4 +14,4 @@ import './sakura_leaves.js';
 import './cactus.js';
 import './snow.js';
 
-export { BlockID, BlockRegistry, initBlockTextures, isBlockSolid, isBlockTransparent, setTextureSeed } from './Block.js';
+export { BlockID, BlockRegistry, isBlockSolid, isBlockTransparent } from './Block.js';
