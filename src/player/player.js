@@ -36,7 +36,7 @@ export class Player {
     document.addEventListener('mousemove', e => this._mm(e));
   }
   _kd(e){switch(e.code){case'KeyW':this.moveForward=true;break;case'KeyS':this.moveBackward=true;break;case'KeyA':this.moveLeft=true;break;case'KeyD':this.moveRight=true;break;case'Space':this.wantJump=true;break;case'Escape':if(document.pointerLockElement)document.exitPointerLock();break;}}
-  _ku(e){switch(e.code){case'KeyW':this.moveForward=false;break;case'KeyS':this.moveBackward=false;break;case'KeyA':this.moveLeft=false;break;case'KeyD':this.moveRight=false;break;}}
+  _ku(e){switch(e.code){case'KeyW':this.moveForward=false;break;case'KeyS':this.moveBackward=false;break;case'KeyA':this.moveLeft=false;break;case'KeyD':this.moveRight=false;break;case'Space':this.wantJump=false;break;}}
   _mm(e){if(!this.isLocked)return;const s=0.002;this.yaw-=e.movementX*s;this.pitch-=e.movementY*s;this.pitch=Math.max(-Math.PI/2+0.01,Math.min(Math.PI/2-0.01,this.pitch));}
 
   update(delta, getBlockAt) {
