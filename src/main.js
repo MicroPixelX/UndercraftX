@@ -10,7 +10,6 @@ import { Renderer } from './renderer/renderer.js';
 import { Player } from './player/player.js';
 import { Game } from './game.js';
 import { HUD } from './ui/hud.js';
-import { setTextureSeed } from './blocks/index.js';
 
 class UndercraftX {
   constructor() {
@@ -55,16 +54,12 @@ class UndercraftX {
   _start() {
     const seed = this._getSeed();
 
-    // FIX #1: Set texture seed before block initialization so textures are deterministic
-    setTextureSeed(seed);
-
     this.startScreen.style.display = 'none';
     this.hud.show();
     this.game = new Game(this.scene, this.camera, this.container, seed);
     this.player = new Player(this.camera, this.container);
     const spawn = this.game.getSpawnPosition();
     this.player.position.copy(spawn);
-    this.game.updateChunks(spawn.x, spawn.z);
     this.container.requestPointerLock();
     this.player.isLocked = true;
     this.isRunning = true; this.lastTime = performance.now();
