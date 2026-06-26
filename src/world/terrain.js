@@ -54,13 +54,14 @@ class SimplexNoise {
     const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2;
     const x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
     const ii = i & 255, jj = j & 255;
+    const p = this.perm;
     let n0 = 0, n1 = 0, n2 = 0;
     let t0 = 0.5 - x0 * x0 - y0 * y0;
-    if (t0 >= 0) { t0 *= t0; const g = this.perm[ii + this.perm[jj]] % 12; n0 = t0 * t0 * this._grad2(g, x0, y0); }
+    if (t0 >= 0) { t0 *= t0; const gi = p[ii + p[jj]] % 12; n0 = t0 * t0 * this._grad2(gi, x0, y0); }
     let t1 = 0.5 - x1 * x1 - y1 * y1;
-    if (t1 >= 0) { t1 *= t1; const g = this.perm[ii + i1 + this.perm[jj + j1]] % 12; n1 = t1 * t1 * this._grad2(g, x1, y1); }
+    if (t1 >= 0) { t1 *= t1; const gi = p[ii + i1 + p[jj + j1]] % 12; n1 = t1 * t1 * this._grad2(gi, x1, y1); }
     let t2 = 0.5 - x2 * x2 - y2 * y2;
-    if (t2 >= 0) { t2 *= t2; const g = this.perm[ii + 1 + this.perm[jj + 1]] % 12; n2 = t2 * t2 * this._grad2(g, x2, y2); }
+    if (t2 >= 0) { t2 *= t2; const gi = p[ii + 1 + p[jj + 1]] % 12; n2 = t2 * t2 * this._grad2(gi, x2, y2); }
     return 70 * (n0 + n1 + n2);
   }
 
@@ -106,17 +107,19 @@ class SimplexNoise {
 
     let n0 = 0, n1 = 0, n2 = 0, n3 = 0;
 
+    const p = this.perm;
+
     let tt = 0.6 - x0*x0 - y0*y0 - z0*z0;
-    if (tt >= 0) { tt *= tt; const gi = this.perm[ii + this.perm[jj + this.perm[kk]]] % 12; n0 = tt * tt * this._grad3(gi, x0, y0, z0); }
+    if (tt >= 0) { tt *= tt; const gi = p[ii + p[jj + p[kk]]] % 12; n0 = tt * tt * this._grad3(gi, x0, y0, z0); }
 
     tt = 0.6 - x1*x1 - y1*y1 - z1*z1;
-    if (tt >= 0) { tt *= tt; const gi = this.perm[ii+i1 + this.perm[jj+j1 + this.perm[kk+k1]]] % 12; n1 = tt * tt * this._grad3(gi, x1, y1, z1); }
+    if (tt >= 0) { tt *= tt; const gi = p[ii + i1 + p[jj + j1 + p[kk + k1]]] % 12; n1 = tt * tt * this._grad3(gi, x1, y1, z1); }
 
     tt = 0.6 - x2*x2 - y2*y2 - z2*z2;
-    if (tt >= 0) { tt *= tt; const gi = this.perm[ii+i2 + this.perm[jj+j2 + this.perm[kk+k2]]] % 12; n2 = tt * tt * this._grad3(gi, x2, y2, z2); }
+    if (tt >= 0) { tt *= tt; const gi = p[ii + i2 + p[jj + j2 + p[kk + k2]]] % 12; n2 = tt * tt * this._grad3(gi, x2, y2, z2); }
 
     tt = 0.6 - x3*x3 - y3*y3 - z3*z3;
-    if (tt >= 0) { tt *= tt; const gi = this.perm[ii+1 + this.perm[jj+1 + this.perm[kk+1]]] % 12; n3 = tt * tt * this._grad3(gi, x3, y3, z3); }
+    if (tt >= 0) { tt *= tt; const gi = p[ii + 1 + p[jj + 1 + p[kk + 1]]] % 12; n3 = tt * tt * this._grad3(gi, x3, y3, z3); }
 
     return 32 * (n0 + n1 + n2 + n3);
   }
@@ -317,9 +320,10 @@ export class TerrainGenerator {
       if (maxDiff > 6 && wy > gh + 1) return BlockID.STONE;
     }
 
-    if (wy < gh - 4) return BlockID.STONE;
-    if (wy < gh) return BlockID.DIRT;
+    if (wy < gh - 4) return (biome === BIOME.OCEAN || biome === BIOME.DESERT) ? BlockID.SAND : BlockID.STONE;
+    if (wy < gh) return (biome === BIOME.OCEAN) ? BlockID.SAND : BlockID.DIRT;
     if (wy === gh) {
+      if (biome === BIOME.OCEAN) return BlockID.SAND;
       if (gh >= this.seaLevel - 2 && gh <= this.seaLevel + 2) return BlockID.SAND;
       switch (biome) {
         case BIOME.DESERT: return BlockID.SAND;
@@ -367,34 +371,43 @@ export class TerrainGenerator {
 
       let types = [];
       let density = 0;
+      let maxRadius = 0;
       switch (b) {
         case BIOME.DESERT:
           types = [TreeTypes[4]];
           density = 0.004;
+          maxRadius = 1;
           break;
         case BIOME.SNOW:
           types = [TreeTypes[1]];
           density = 0.007;
+          maxRadius = 2;
           break;
         case BIOME.FOREST:
           types = [TreeTypes[0], TreeTypes[1], TreeTypes[2]];
           density = 0.018;
+          maxRadius = 3;
           break;
         case BIOME.JUNGLE:
           types = [TreeTypes[0], TreeTypes[2]];
           density = 0.025;
+          maxRadius = 3;
           break;
         case BIOME.PLAINS:
           types = [TreeTypes[0], TreeTypes[3]];
           density = 0.005;
+          maxRadius = 3;
           break;
         case BIOME.MOUNTAINS:
           types = [TreeTypes[1]];
           density = 0.005;
+          maxRadius = 2;
           break;
         default:
           continue;
       }
+
+      if (lx < maxRadius || lx >= 16 - maxRadius || lz < maxRadius || lz >= 16 - maxRadius) continue;
 
       const posRng = mulberry32(wx * 374761393 + wz * 668265263 + this.seed);
       const treeRoll = posRng();
@@ -405,25 +418,11 @@ export class TerrainGenerator {
           const typeIdx = Math.floor(posRng() * types.length);
           const T = types[typeIdx];
           if (h >= T.minGround) {
-            // Allow placing tree blocks in neighbor chunks if they are loaded
-            T.place(chunk, lx, h + 1, lz, posRng, this._getBlockFromWorld.bind(this), bx, bz);
+            T.place(chunk, lx, h + 1, lz, posRng);
           }
         }
       }
     }
-  }
-
-  // FIX #2: Helper — get a block from any loaded chunk by world coordinates
-  _getBlockFromWorld(localChunk, bx, bz, wx, wy, wz) {
-    const lx = wx - bx;
-    const lz = wz - bz;
-    // If within local chunk bounds, use it directly
-    if (lx >= 0 && lx < 16 && lz >= 0 && lz < 16) {
-      return localChunk.getBlock(lx, wy, lz);
-    }
-    // Outside this chunk — we cannot access neighbor chunks during generation.
-    // Return AIR so tree placement doesn't block, and only place blocks in our chunk.
-    return BlockID.AIR;
   }
 
   _clamp(h) {
