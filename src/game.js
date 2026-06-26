@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { Chunk } from './world/chunk.js';
 import { TerrainGenerator, BIOME, BIOME_NAMES } from './world/terrain.js';
-import { BlockID, isBlockSolid, initBlockTextures } from './blocks/Block.js';
+import { BlockID, isBlockSolid } from './blocks/Block.js';
 import './blocks/index.js';
 
 const RD = 4, CS = 16, CH = 256;
@@ -33,7 +33,6 @@ export class Game {
     this.scene = scene; this.camera = camera; this.domElement = dom;
     this.seed = seed;
     this._spawnRng = mulberry32(seed ^ 0xDEADBEEF);
-    initBlockTextures();
     this.chunks = new Map();
     this.terrain = new TerrainGenerator(seed);
     this.cx = NaN; this.cz = NaN; this.throttle = 0;
@@ -133,19 +132,19 @@ export class Game {
     for(let attempt=0;attempt<40;attempt++){
       const sx=8+Math.floor(rng()*64)-32;
       const sz=8+Math.floor(rng()*64)-32;
+      this.updateChunks(sx, sz);
       const h=this.terrain.getHeight(sx,sz);
       const biome=this.terrain.getBiome(sx,sz);
       if(biome!==BIOME.OCEAN&&h>this.terrain.seaLevel+1){
-        const sy = h + 1; // spawn just above ground
-        // FIX-G: Verify the spawn area is clear of solid blocks (trees etc.)
+        const sy = h + 2;
         if (this._isSpawnClear(sx, sy, sz)) {
           return new THREE.Vector3(sx, sy, sz);
         }
       }
     }
-    // Fallback — use default position and hope for the best
+    this.updateChunks(8, 8);
     const sx=8,sz=8,h=this.terrain.getHeight(sx,sz);
-    let sy=Math.max(h+1,this.terrain.seaLevel+2);
+    let sy=Math.max(h+2,this.terrain.seaLevel+2);
     return new THREE.Vector3(sx,sy,sz);
   }
 
