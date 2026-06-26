@@ -24,10 +24,10 @@ export class Player {
   constructor(camera, dom) {
     this.camera = camera; this.domElement = dom;
     this.position = new THREE.Vector3(8, 50, 8);
-    this.velocity = new THREE.Vector3();
+    this.velocity = new THREE.Vector3(0, 0, 0);
     this.pitch = 0; this.yaw = 0;
     this.moveForward = this.moveBackward = this.moveLeft = this.moveRight = false;
-    this.wantJump = false; this.isLocked = false; this.onGround = false; this.isInWater = false;
+    this.wantJump = false; this.isLocked = false; this.onGround = true; this.isInWater = false;
     this.sprinting = false;
     this.walkSpeed = 4.3; this.sprintSpeed = 6.5; this.jumpForce = 7.5; this.gravity = 22; this.waterGravity = 6;
     this.width = 0.6; this.height = 1.8; this.eyeHeight = 1.62;
@@ -240,6 +240,13 @@ export class Player {
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
+  }
+
+  spawnAt(pos) {
+    this.position.copy(pos);
+    this.velocity.set(0, 0, 0);
+    this.onGround = true;
+    this.camera.position.set(this.position.x, this.position.y + this.eyeHeight, this.position.z);
   }
 
   getLookDirection() {
