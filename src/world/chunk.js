@@ -148,7 +148,7 @@ export class Chunk {
       // FIX-D: Always use Uint32 indices to prevent overflow on dense chunks.
       // Dense chunks (caves, forests, mountains) can exceed 65535 vertices,
       // which silently corrupts the mesh with Uint16 indices.
-      const maxIdx = Math.max(...d.solid.idx, 0);
+      const maxIdx = d.solid.idx.reduce((a, b) => b > a ? b : a, 0);
       const IndexArrayType = maxIdx > 65535 ? Uint32Array : Uint16Array;
       g.setIndex(new THREE.BufferAttribute(new IndexArrayType(d.solid.idx), 1));
       g.computeVertexNormals();
@@ -163,7 +163,7 @@ export class Chunk {
       g.setAttribute('position', new THREE.Float32BufferAttribute(d.water.pos, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(d.water.col, 3));
       // FIX-D: Same Uint32 fix for water mesh
-      const maxWIdx = Math.max(...d.water.idx, 0);
+      const maxWIdx = d.water.idx.reduce((a, b) => b > a ? b : a, 0);
       const WIndexArrayType = maxWIdx > 65535 ? Uint32Array : Uint16Array;
       g.setIndex(new THREE.BufferAttribute(new WIndexArrayType(d.water.idx), 1));
       g.computeVertexNormals();
