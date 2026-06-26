@@ -13,5 +13,10 @@ import './birch_log.js';
 import './sakura_leaves.js';
 import './cactus.js';
 import './snow.js';
+import './rose.js';
+import './dandelion.js';
+import './tall_grass.js';
+import './coal_ore.js';
+import './iron_ore.js';
 
 export { BlockID, BlockRegistry, initBlockTextures, isBlockSolid, isBlockTransparent, setTextureSeed } from './Block.js';

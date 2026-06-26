@@ -4,21 +4,21 @@
  * FIXES:
  *  - #6: Only rebuild dirty chunks instead of ALL chunks on every update
  *  - #11: getSpawnPosition now uses the seeded PRNG instead of Math.random()
- *  - #12: updateChunks double-rebuild fix — new chunks are built in a single pass.
- *  - FIX-G: getSpawnPosition now checks that the spawn area is clear of solid blocks
- *           (trees, etc.) before placing the player. Tries up to 20 positions,
- *           and for each position, verifies the player AABB is free.
+ *  - #12: updateChunks double-rebuild fix
+ *  - FIX-G: getSpawnPosition checks that the spawn area is clear of solid blocks
+ *  - FIX-P: getBlockAt now floors wx and wz
+ *  - FIX-Q: updateChunks throttle starts at threshold
+ *  - FIX-V6: _isSpawnClear also rejects underwater spawn positions
  */
 
 import * as THREE from 'three';
 import { Chunk } from './world/chunk.js';
 import { TerrainGenerator, BIOME, BIOME_NAMES } from './world/terrain.js';
-import { BlockID, isBlockSolid, initBlockTextures } from './blocks/Block.js';
+import { BlockID, isBlockSolid, isBlockTransparent, initBlockTextures, BlockRegistry } from './blocks/Block.js';
 import './blocks/index.js';
 
 const RD = 4, CS = 16, CH = 256;
 
-// Deterministic PRNG (mulberry32) — same as in terrain.js
 function mulberry32(a) {
   return function () {
     a |= 0; a = a + 0x6D2B79F5 | 0;
@@ -36,12 +36,15 @@ export class Game {
     initBlockTextures();
     this.chunks = new Map();
     this.terrain = new TerrainGenerator(seed);
-    this.cx = NaN; this.cz = NaN; this.throttle = 0;
+    this.cx = NaN; this.cz = NaN;
+    this.throttle = 1;
   }
 
   key(cx,cz){return `${cx},${cz}`;}
 
   getBlockAt(wx,wy,wz){
+    wx = Math.floor(wx);
+    wz = Math.floor(wz);
     const iy = Math.floor(wy);
     if(iy < 0 || iy >= CH) return BlockID.AIR;
     const cx=Math.floor(wx/CS),cz=Math.floor(wz/CS);
@@ -75,13 +78,16 @@ export class Game {
       }
     }
 
+    const toRemove = [];
     for(const [k,ch] of this.chunks){
       if(!loaded.has(k)){
         ch.dispose(this.scene);
-        this.chunks.delete(k);
+        toRemove.push(k);
       }
     }
+    for(const k of toRemove) this.chunks.delete(k);
 
+    let rebuiltCount = 0;
     for(const [,ch] of this.chunks){
       if(!ch.dirty){
         const ncx = ch.chunkX, ncz = ch.chunkZ;
@@ -101,29 +107,49 @@ export class Game {
     for(const [,ch] of this.chunks){
       if(ch.dirty){
         ch.buildMesh(this.scene,(gx,gy,gz)=>this.getNeighborBlock(gx,gy,gz));
+        rebuiltCount++;
+        if(rebuiltCount >= 8) break;
       }
     }
   }
 
   update(pos){
     this.throttle++;
-    if(this.throttle>=10){
+    if(this.throttle>=3){
       this.throttle=0;
       this.updateChunks(pos.x,pos.z);
     }
   }
 
+  forceBuildAll(getNeighbor) {
+    for (const [, ch] of this.chunks) {
+      if (ch.dirty) {
+        ch.buildMesh(this.scene, getNeighbor || ((gx, gy, gz) => this.getNeighborBlock(gx, gy, gz)));
+      }
+    }
+  }
+
+  getInitialChunkCount() {
+    let count = 0;
+    for (let dx = -RD; dx <= RD; dx++)
+      for (let dz = -RD; dz <= RD; dz++)
+        count++;
+    return count;
+  }
+
   isSolidAt(wx,wy,wz){return isBlockSolid(this.getBlockAt(Math.floor(wx),Math.floor(wy),Math.floor(wz)));}
 
-  // FIX-G: Check if a position is clear for the player (no solid blocks in their AABB)
+  // FIX-V6: Also reject spawn positions that are underwater
   _isSpawnClear(sx, sy, sz) {
-    const hw = 0.3; // player half-width
-    const mh = 1.8; // player height
-    // Check all block positions the player AABB would overlap
+    const hw = 0.3;
+    const mh = 1.8;
     for (let x = Math.floor(sx - hw); x <= Math.floor(sx + hw); x++)
       for (let y = Math.floor(sy); y <= Math.floor(sy + mh); y++)
         for (let z = Math.floor(sz - hw); z <= Math.floor(sz + hw); z++) {
-          if (isBlockSolid(this.getBlockAt(x, y, z))) return false;
+          const b = this.getBlockAt(x, y, z);
+          if (isBlockSolid(b)) return false;
+          // FIX-V6: Reject if feet are in water
+          if (y === Math.floor(sy) && b === BlockID.WATER) return false;
         }
     return true;
   }
@@ -136,14 +162,12 @@ export class Game {
       const h=this.terrain.getHeight(sx,sz);
       const biome=this.terrain.getBiome(sx,sz);
       if(biome!==BIOME.OCEAN&&h>this.terrain.seaLevel+1){
-        const sy = h + 1; // spawn just above ground
-        // FIX-G: Verify the spawn area is clear of solid blocks (trees etc.)
+        const sy = h + 1;
         if (this._isSpawnClear(sx, sy, sz)) {
           return new THREE.Vector3(sx, sy, sz);
         }
       }
     }
-    // Fallback — use default position and hope for the best
     const sx=8,sz=8,h=this.terrain.getHeight(sx,sz);
     let sy=Math.max(h+1,this.terrain.seaLevel+2);
     return new THREE.Vector3(sx,sy,sz);
@@ -152,5 +176,96 @@ export class Game {
   getBiomeAt(x,z){
     const b=this.terrain.getBiome(x,z);
     return BIOME_NAMES[b]||'?';
+  }
+
+  dispose() {
+    for (const [,ch] of this.chunks) {
+      ch.dispose(this.scene);
+    }
+    this.chunks.clear();
+    this.terrain = null;
+    this.cx = NaN;
+    this.cz = NaN;
+    this.throttle = 9;
+  }
+
+  raycastBlock(origin, direction, maxDist = 6) {
+    const dx = direction.x, dy = direction.y, dz = direction.z;
+    let x = Math.floor(origin.x), y = Math.floor(origin.y), z = Math.floor(origin.z);
+    const stepX = dx >= 0 ? 1 : -1;
+    const stepY = dy >= 0 ? 1 : -1;
+    const stepZ = dz >= 0 ? 1 : -1;
+    const tDeltaX = dx !== 0 ? Math.abs(1 / dx) : Infinity;
+    const tDeltaY = dy !== 0 ? Math.abs(1 / dy) : Infinity;
+    const tDeltaZ = dz !== 0 ? Math.abs(1 / dz) : Infinity;
+    let tMaxX = dx !== 0 ? ((dx > 0 ? (x + 1 - origin.x) : (origin.x - x)) * tDeltaX) : Infinity;
+    let tMaxY = dy !== 0 ? ((dy > 0 ? (y + 1 - origin.y) : (origin.y - y)) * tDeltaY) : Infinity;
+    let tMaxZ = dz !== 0 ? ((dz > 0 ? (z + 1 - origin.z) : (origin.z - z)) * tDeltaZ) : Infinity;
+    let dist = 0;
+    let face = { x: 0, y: 0, z: 0 };
+
+    while (dist < maxDist) {
+      const block = this.getBlockAt(x, y, z);
+      if (block !== BlockID.AIR && block !== BlockID.WATER && (isBlockSolid(block) || isBlockTransparent(block))) {
+        return { x, y, z, block, face, dist };
+      }
+
+      if (tMaxX < tMaxY) {
+        if (tMaxX < tMaxZ) {
+          dist = tMaxX; x += stepX; tMaxX += tDeltaX;
+          face = { x: -stepX, y: 0, z: 0 };
+        } else {
+          dist = tMaxZ; z += stepZ; tMaxZ += tDeltaZ;
+          face = { x: 0, y: 0, z: -stepZ };
+        }
+      } else {
+        if (tMaxY < tMaxZ) {
+          dist = tMaxY; y += stepY; tMaxY += tDeltaY;
+          face = { x: 0, y: -stepY, z: 0 };
+        } else {
+          dist = tMaxZ; z += stepZ; tMaxZ += tDeltaZ;
+          face = { x: 0, y: 0, z: -stepZ };
+        }
+      }
+    }
+    return null;
+  }
+
+  breakBlock(bx, by, bz) {
+    const cx = Math.floor(bx / CS), cz = Math.floor(bz / CS);
+    const ch = this.chunks.get(this.key(cx, cz));
+    if (!ch) return false;
+    const lx = ((bx % CS) + CS) % CS, lz = ((bz % CS) + CS) % CS;
+    const block = ch.getBlock(lx, by, lz);
+    if (block === BlockID.AIR || block === BlockID.BEDROCK) return false;    ch.setBlock(lx, by, lz, BlockID.AIR);
+    this._markDirty(cx, cz);
+    if (lx === 0) this._markDirty(cx-1, cz);
+    if (lx === 15) this._markDirty(cx+1, cz);
+    if (lz === 0) this._markDirty(cx, cz-1);
+    if (lz === 15) this._markDirty(cx, cz+1);
+    return true;
+  }
+
+  placeBlock(bx, by, bz, face) {
+    const px = bx + face.x, py = by + face.y, pz = bz + face.z;
+    if (py < 0 || py >= CH) return false;
+    const cx = Math.floor(px / CS), cz = Math.floor(pz / CS);
+    const ch = this.chunks.get(this.key(cx, cz));
+    if (!ch) return false;
+    const lx = ((px % CS) + CS) % CS, lz = ((pz % CS) + CS) % CS;
+    const existing = ch.getBlock(lx, py, lz);
+    if (existing !== BlockID.AIR && existing !== BlockID.WATER) return false;
+    ch.setBlock(lx, py, lz, BlockID.DIRT);
+    this._markDirty(cx, cz);
+    if (lx === 0) this._markDirty(cx-1, cz);
+    if (lx === 15) this._markDirty(cx+1, cz);
+    if (lz === 0) this._markDirty(cx, cz-1);
+    if (lz === 15) this._markDirty(cx, cz+1);
+    return true;
+  }
+
+  _markDirty(cx, cz) {
+    const ch = this.chunks.get(this.key(cx, cz));
+    if (ch) ch.dirty = true;
   }
 }

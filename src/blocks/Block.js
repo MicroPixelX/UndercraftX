@@ -4,10 +4,9 @@
  * FIXES:
  *  - #1: generateTexture now accepts a seeded RNG so textures are deterministic.
  *  - #11: Texture generation is now lazy (deferred until initBlockTextures is called).
- *  - FIX-A: initBlockTextures now iterates in sorted numeric order by BlockID
- *           instead of relying on Object.entries() order (which is not guaranteed by spec).
- *           Each block also gets its own independent seeded RNG derived from (seed + blockID),
- *           so adding/removing blocks does NOT change textures of existing blocks.
+ *  - FIX-A: initBlockTextures iterates in sorted numeric order by BlockID.
+ *  - FIX-V3: initBlockTextures now disposes old GPU textures/materials before
+ *           re-creating them — prevents GPU memory leak on game restart.
  */
 
 import * as THREE from 'three';
@@ -15,22 +14,19 @@ import * as THREE from 'three';
 export const BlockID = {
   AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, WOOD: 4, LEAVES: 5,
   WATER: 6, SAND: 7, BEDROCK: 8, OAK_LOG: 9, PINE_LOG: 10,
-  BIRCH_LOG: 11, SAKURA_LEAVES: 12, CACTUS: 13, SNOW: 14
+  BIRCH_LOG: 11, SAKURA_LEAVES: 12, CACTUS: 13, SNOW: 14,
+  ROSE: 15, DANDELION: 16, TALL_GRASS: 17, COAL_ORE: 18, IRON_ORE: 19
 };
 
 export const BlockRegistry = {};
 
-// FIX-A: Global seed stored for per-block RNG derivation
 let _textureSeed = 42;
 
 export function setTextureSeed(seed) {
   _textureSeed = seed;
 }
 
-// FIX-A: Per-block seeded RNG — each block ID gets its own deterministic sequence
-// derived from the global seed + block ID, so block order does not matter.
 function _makeBlockRng(blockId) {
-  // mulberry32 seeded with (globalSeed + blockId * large-prime)
   let s = (_textureSeed + blockId * 2654435761) | 0;
   return function () {
     s |= 0; s = s + 0x6D2B79F5 | 0;
@@ -40,14 +36,10 @@ function _makeBlockRng(blockId) {
   };
 }
 
-// FIX #11: generateTexture now returns a lazy descriptor instead of creating the
-// texture immediately. The actual CanvasTexture is created in initBlockTextures()
-// after setTextureSeed() has been called with the player's chosen seed.
 export function generateTexture(w, h, drawFn) {
   return { _lazy: true, w, h, drawFn };
 }
 
-// Internal: actually create a THREE.CanvasTexture from a lazy descriptor
 function _resolveTexture(desc, rng) {
   if (!desc || !desc._lazy) return desc;
   const c = document.createElement('canvas');
@@ -58,6 +50,23 @@ function _resolveTexture(desc, rng) {
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
   return tex;
+}
+
+function _disposeBlockResources(block) {
+  if (block.materials) {
+    for (const mat of block.materials) {
+      if (mat.map && mat.map !== mat._sharedMap) mat.map.dispose();
+      mat.dispose();
+    }
+    block.materials = null;
+  }
+  if (block._resolvedTextures) {
+    for (const key of Object.keys(block._resolvedTextures)) {
+      const tex = block._resolvedTextures[key];
+      if (tex && tex.isTexture) tex.dispose();
+    }
+    block._resolvedTextures = null;
+  }
 }
 
 export function createBlockMaterial(top, side, bottom, opts = {}) {
@@ -73,6 +82,10 @@ export function createBlockMaterial(top, side, bottom, opts = {}) {
 }
 
 export function registerBlock(id, def) {
+  // FIX-V3: Dispose old resources if re-registering over an existing block
+  if (BlockRegistry[id]) {
+    _disposeBlockResources(BlockRegistry[id]);
+  }
   BlockRegistry[id] = {
     id, name: def.name || '?', solid: def.solid ?? true,
     transparent: def.transparent || false, opacity: def.opacity ?? 1,
@@ -82,17 +95,16 @@ export function registerBlock(id, def) {
 }
 
 export function initBlockTextures() {
-  // FIX-A: Iterate in sorted numeric order by BlockID instead of Object.entries()
-  // which is not guaranteed to be in insertion/numeric order by the JS spec.
   const sortedIds = Object.keys(BlockRegistry).map(Number).sort((a, b) => a - b);
   for (const id of sortedIds) {
     const block = BlockRegistry[id];
+
+    // FIX-V3: Dispose old GPU resources before creating new ones
+    _disposeBlockResources(block);
+
     if (block._lazyTextures) {
-      // FIX-A: Each block gets its own RNG derived from (seed + blockId)
-      // This ensures adding/removing blocks doesn't shift textures of other blocks
       const rng = _makeBlockRng(id);
       const resolved = {};
-      // Also iterate texture keys in sorted order for determinism
       const texKeys = Object.keys(block._lazyTextures).sort();
       for (const key of texKeys) {
         resolved[key] = _resolveTexture(block._lazyTextures[key], rng);

@@ -15,10 +15,17 @@
     <p>Engine Voxel 3D</p>
     <div class="seed-row">
       <label for="seed-input">Seed:</label>
-      <input type="text" id="seed-input" placeholder="Número ou texto (vazio = 42)" spellcheck="false">
+      <input type="number" id="seed-input" placeholder="Número (vazio = 42)" spellcheck="false">
     </div>
     <button id="start-btn">Clique para Jogar</button>
-    <p class="controls">WASD = Mover | Mouse = Olhar | Espaço = Pular | Esc = Soltar cursor</p>
+    <p class="controls">WASD = Mover | Mouse = Olhar | Espaço = Pular | Shift = Correr | LMB = Quebrar | RMB = Colocar | Esc = Soltar cursor</p>
+  </div>
+
+  <div id="loading-bar">
+    <div id="loading-inner">
+      <div id="loading-text">Gerando terreno...</div>
+      <div id="loading-track"><div id="loading-fill"></div></div>
+    </div>
   </div>
 
   <script type="module" src="/src/main.js"></script>

@@ -34,19 +34,15 @@ body {
 }
 
 #crosshair::before {
-  width: 20px;
-  height: 2px;
+  width: 4px;
+  height: 4px;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
 }
 
 #crosshair::after {
-  width: 2px;
-  height: 20px;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  display: none;
 }
 
 #hud {
@@ -143,4 +139,46 @@ body {
 
 .seed-row input::placeholder {
   color: #555;
+}
+
+#loading-bar {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(10, 10, 20, 0.92);
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 300;
+  color: white;
+  font-family: 'Courier New', monospace;
+}
+
+#loading-inner {
+  width: 400px;
+  max-width: 80vw;
+  text-align: center;
+}
+
+#loading-text {
+  font-size: 18px;
+  margin-bottom: 20px;
+  color: #bbb;
+  letter-spacing: 2px;
+}
+
+#loading-track {
+  width: 100%;
+  height: 14px;
+  background: #2a2a4a;
+  border: 2px solid #4a4a6a;
+  overflow: hidden;
+}
+
+#loading-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #4a6a8a, #6a8aaa);
+  transition: width 0.15s ease;
 }
