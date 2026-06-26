@@ -64,6 +64,8 @@ class UndercraftX {
     if (this._started) return;
     this._started = true;
 
+    this.isRunning = false;
+
     const seed = this._getSeed();
     setTextureSeed(seed);
 
@@ -99,7 +101,7 @@ class UndercraftX {
     this.container.addEventListener('contextmenu', this._onContextMenu);
 
     const spawn = this.game.getSpawnPosition();
-    this.player.position.copy(spawn);
+    this.player.spawnAt(spawn);
     this.game.updateChunks(spawn.x, spawn.z);
 
     this.worldBuilder.buildAsync(this.game, this.loadingBar, () => this._finishStart(seed));
