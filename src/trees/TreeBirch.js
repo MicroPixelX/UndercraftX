@@ -9,7 +9,7 @@ import { BlockID } from '../blocks/Block.js';
 export class TreeBirch {
   static get chance() { return 0.005; }
   static get minGround() { return 10; }
-  static place(chunk, lx, ly, lz, rng = Math.random, _getWorld = null, _bx = 0, _bz = 0) {
+  static place(chunk, lx, ly, lz, rng = Math.random) {
     const h = 5 + Math.floor(rng() * 3);
     for (let y = 0; y < h; y++) chunk.setBlock(lx, ly + y, lz, BlockID.BIRCH_LOG);
     const cy = ly + h;
